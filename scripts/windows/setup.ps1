@@ -685,6 +685,123 @@ function Optimize-DisableServices {
 
     $script:Results.Optimizations += 'Services: SysMain, DiagTrack, dmwappushservice disabled'
 }
+
+function Optimize-DisableStartupItems {
+    Write-LogInfo "Disabling unnecessary startup items..."
+
+    $disabledItems = @()
+
+    # 1. Disable Microsoft Edge startup (multiple locations)
+    # Registry Run keys
+    $edgeRunPaths = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+    )
+
+    foreach ($path in $edgeRunPaths) {
+        try {
+            $items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            $items.PSObject.Properties | Where-Object { $_.Name -like '*Edge*' -or $_.Name -like '*MicrosoftEdge*' } | ForEach-Object {
+                Remove-ItemProperty -Path $path -Name $_.Name -ErrorAction SilentlyContinue
+                Write-LogInfo "  Removed: $($_.Name) from $path"
+                $disabledItems += "Edge ($($_.Name))"
+            }
+        } catch {}
+    }
+
+    # Disable Edge startup boost via registry
+    $edgePrefsPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+    if (-not (Test-Path $edgePrefsPath)) { $null = New-Item -Path $edgePrefsPath -Force }
+    Set-RegistryValue -Path $edgePrefsPath -Name 'StartupBoostEnabled' -Value 0
+    Set-RegistryValue -Path $edgePrefsPath -Name 'BackgroundModeEnabled' -Value 0
+    $disabledItems += 'Edge Startup Boost'
+
+    # Disable Edge scheduled tasks
+    $edgeTasks = @(
+        '\Microsoft\Edge\MicrosoftEdgeUpdateTaskMachineCore',
+        '\Microsoft\Edge\MicrosoftEdgeUpdateTaskMachineUA',
+        '\MicrosoftEdgeUpdateTaskMachineCore',
+        '\MicrosoftEdgeUpdateTaskMachineUA'
+    )
+    foreach ($task in $edgeTasks) {
+        try {
+            Disable-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue | Out-Null
+        } catch {}
+    }
+
+    # 2. Disable Windows Security Health Systray (SecurityHealth)
+    $securityHealthPaths = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    )
+
+    foreach ($path in $securityHealthPaths) {
+        try {
+            Remove-ItemProperty -Path $path -Name 'SecurityHealth' -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $path -Name 'WindowsDefender' -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+    # Disable via Explorer startup approved
+    $startupApprovedPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+    if (Test-Path $startupApprovedPath) {
+        try {
+            # Setting to disabled (first byte = 03 means disabled)
+            $disabledValue = [byte[]](0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+            Set-ItemProperty -Path $startupApprovedPath -Name 'SecurityHealth' -Value $disabledValue -Type Binary -ErrorAction SilentlyContinue
+        } catch {}
+    }
+    $disabledItems += 'SecurityHealth Systray'
+
+    # 3. Disable Logitech Download Assistant (LogiLDA)
+    $logitechPaths = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+    )
+
+    foreach ($path in $logitechPaths) {
+        try {
+            Remove-ItemProperty -Path $path -Name 'Logitech Download Assistant' -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $path -Name 'LogiLDA' -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+    # Disable Logitech scheduled tasks
+    $logiTasks = Get-ScheduledTask -TaskName '*Logitech*' -ErrorAction SilentlyContinue
+    foreach ($task in $logiTasks) {
+        try {
+            Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
+        } catch {}
+    }
+    $disabledItems += 'Logitech Download Assistant'
+
+    # 4. Disable other common bloatware startup items
+    $bloatwareItems = @(
+        'OneDrive',
+        'OneDriveSetup',
+        'Cortana',
+        'GameBar',
+        'Teams',
+        'Spotify'
+    )
+
+    foreach ($item in $bloatwareItems) {
+        foreach ($path in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run')) {
+            try {
+                $existing = Get-ItemProperty -Path $path -Name $item -ErrorAction SilentlyContinue
+                if ($existing) {
+                    Remove-ItemProperty -Path $path -Name $item -ErrorAction SilentlyContinue
+                    $disabledItems += $item
+                }
+            } catch {}
+        }
+    }
+
+    Write-LogSuccess "Startup items disabled: Edge, SecurityHealth, LogiLDA"
+    $script:Results.Optimizations += 'Startup: Edge, SecurityHealth, LogiLDA disabled'
+}
 #endregion
 
 #region Main
@@ -812,6 +929,7 @@ function Main {
     # System (safe)
     Optimize-DisableWindowsUpdate
     Optimize-DisableServices
+    Optimize-DisableStartupItems
 
     # QoS (safe)
     Optimize-QoSForVBAN

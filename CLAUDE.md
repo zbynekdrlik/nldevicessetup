@@ -189,6 +189,38 @@ irm https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bo
 - Publish release notes
 - Update latest pointers
 
+## CI/CD Enforcement Policy
+
+### Zero Tolerance for Failures
+- **NEVER proceed with code changes when GitHub Actions are failing**
+- All CI checks must pass before any merge or deployment
+- Fix failing tests immediately - they are the highest priority
+- A failing pipeline is a blocker, not a warning
+
+### Continuous Improvement
+- Regularly review and tighten CI/CD rules
+- Add new linting rules as patterns emerge
+- Increase test coverage requirements over time (target: 80%+)
+- Monitor for flaky tests and fix root causes immediately
+
+### Test Coverage Requirements
+- New code must include corresponding tests
+- Coverage must not decrease with any PR
+- Critical paths (network, QoS, system optimization) require 90%+ coverage
+- Integration tests for all cross-platform functionality
+
+### Quality Gates
+- Linting errors = build failure (no exceptions)
+- Security vulnerabilities = build failure
+- Test failures = build failure
+- Coverage drop = build failure
+
+### Monitoring
+- Review GitHub Actions logs after every commit
+- Track test execution time trends
+- Alert on coverage regression
+- Periodic audit of disabled/skipped tests (must be re-enabled or removed)
+
 ## Security Guidelines
 
 - NEVER commit credentials (TARGETS.md in .gitignore)

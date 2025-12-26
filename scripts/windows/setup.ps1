@@ -943,6 +943,7 @@ function Main {
     $null = Install-WingetPackage -PackageId 'RustDesk.RustDesk' -DisplayName 'RustDesk'
     $null = Install-WingetPackage -PackageId 'OpenJS.NodeJS' -DisplayName 'Node.js'
     $null = Install-WingetPackage -PackageId 'Skillbrains.Lightshot' -DisplayName 'Lightshot'
+    $null = Install-WingetPackage -PackageId 'Brave.Brave' -DisplayName 'Brave Browser'
 
     # Refresh PATH for Node.js
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")

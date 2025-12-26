@@ -141,20 +141,22 @@ function Invoke-CommandWithDryRun {
     }
 }
 
-# Export functions
-Export-ModuleMember -Function @(
-    'Write-LogInfo',
-    'Write-LogSuccess',
-    'Write-LogWarn',
-    'Write-LogError',
-    'Test-Administrator',
-    'Require-Administrator',
-    'Backup-RegistryKey',
-    'Set-RegistryValueIdempotent',
-    'Get-WindowsVersionInfo',
-    'Test-WindowsFeature',
-    'Invoke-CommandWithDryRun'
-) -Variable @(
-    'NLDEVICESSETUP_VERSION',
-    'DRY_RUN'
-)
+# Export functions only when running as a module (not when dot-sourced)
+if ($MyInvocation.MyCommand.ScriptBlock.Module) {
+    Export-ModuleMember -Function @(
+        'Write-LogInfo',
+        'Write-LogSuccess',
+        'Write-LogWarn',
+        'Write-LogError',
+        'Test-Administrator',
+        'Require-Administrator',
+        'Backup-RegistryKey',
+        'Set-RegistryValueIdempotent',
+        'Get-WindowsVersionInfo',
+        'Test-WindowsFeature',
+        'Invoke-CommandWithDryRun'
+    ) -Variable @(
+        'NLDEVICESSETUP_VERSION',
+        'DRY_RUN'
+    )
+}

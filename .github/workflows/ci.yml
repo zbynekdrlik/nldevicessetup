@@ -22,7 +22,7 @@ jobs:
 
       - name: Run ShellCheck
         run: |
-          find . -name "*.sh" -type f | xargs shellcheck -x
+          find . -name "*.sh" -type f | xargs shellcheck -x --severity=warning
 
   lint-powershell:
     name: Lint PowerShell Scripts

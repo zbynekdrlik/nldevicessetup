@@ -480,6 +480,48 @@ function Optimize-DisableTransparency {
     $script:Results.Optimizations += 'Transparency: Disabled'
 }
 
+function Optimize-DisableSounds {
+    Write-LogInfo "Disabling Windows sounds..."
+
+    # Set sound scheme to "No Sounds" (.None)
+    $soundSchemePath = 'HKCU:\AppEvents\Schemes'
+    Set-RegistryValue -Path $soundSchemePath -Name '(Default)' -Value '.None' -Type 'String'
+
+    # Disable all individual sounds by setting them to empty
+    $appEventsPath = 'HKCU:\AppEvents\Schemes\Apps'
+
+    try {
+        Get-ChildItem -Path $appEventsPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.PSChildName -eq '.Current') {
+                Set-ItemProperty -Path $_.PSPath -Name '(Default)' -Value '' -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    catch {
+        Write-LogWarn "Could not disable some sounds: $_"
+    }
+
+    # Disable Windows startup sound
+    $bootAnimationPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation'
+    Set-RegistryValue -Path $bootAnimationPath -Name 'DisableStartupSound' -Value 1
+
+    # Also set via Policies (more reliable)
+    $policiesPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+    Set-RegistryValue -Path $policiesPath -Name 'DisableStartupSound' -Value 1
+
+    # Disable Exit Windows sound
+    $exitSoundPath = 'HKCU:\AppEvents\Schemes\Apps\.Default\SystemExit\.Current'
+    if (-not (Test-Path $exitSoundPath)) {
+        $null = New-Item -Path $exitSoundPath -Force -ErrorAction SilentlyContinue
+    }
+    Set-RegistryValue -Path $exitSoundPath -Name '(Default)' -Value '' -Type 'String'
+
+    Write-LogSuccess "Windows sounds disabled (No Sounds scheme)"
+    Write-LogSuccess "Windows startup sound disabled"
+    $script:Results.Optimizations += 'Sounds: No Sounds scheme'
+    $script:Results.Optimizations += 'Startup sound: Disabled'
+}
+
 function Optimize-NetworkAdapters {
     Write-LogInfo "Optimizing network adapters (registry-based, applies after reboot)..."
     Write-LogWarn "NOTE: Some NIC settings apply after reboot to avoid disconnection"
@@ -1224,6 +1266,7 @@ function Main {
     Optimize-VisualEffects
     Optimize-DarkMode
     Optimize-DisableTransparency
+    Optimize-DisableSounds
 
     # Audio/latency (safe)
     Optimize-MMCSS

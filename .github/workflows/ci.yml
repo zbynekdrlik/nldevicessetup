@@ -107,16 +107,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install kcov
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y kcov
-
       - name: Generate coverage
         run: |
           mkdir -p coverage
-          # Coverage would be generated here when we have more comprehensive tests
-          echo "Coverage generation placeholder"
+          # Coverage generation placeholder
+          # kcov is not available in Ubuntu apt - will use alternative when tests are expanded
+          echo "Coverage tracking ready - comprehensive tests needed"
 
       # - name: Upload to Codecov
       #   uses: codecov/codecov-action@v4

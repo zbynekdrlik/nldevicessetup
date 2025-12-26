@@ -187,13 +187,9 @@
             :set issuesFound ($issuesFound + 1)
         }
 
-        # Check multicast router (should be set for proper Dante multicast)
+        # Log multicast router setting (not changed - depends on network topology)
         :local mcrouter [get $i multicast-router]
-        :if ($mcrouter != "permanent") do={
-            :log info "$configName - Setting multicast-router=permanent on $brname"
-            set $i multicast-router=permanent
-            :set issuesFixed ($issuesFixed + 1)
-        }
+        :log info "$configName - Bridge $brname multicast-router: $mcrouter"
     }
 }
 :log info "$configName - Bridge settings configured"
@@ -322,9 +318,9 @@
 :log info "$configName - Optimizations Applied:"
 :log info "  - Flow control: DISABLED"
 :log info "  - IGMP fast-leave: ENABLED"
-:log info "  - HW offloading: ENABLED"
-:log info "  - EEE: DISABLED"
-:log info "  - Multicast router: PERMANENT"
+:log info "  - Bridge HW offloading: ENABLED"
+:log info "  - QoS HW offloading: ENABLED"
+:log info "  - EEE: DISABLED (if supported)"
 :log info ""
 :if ($issuesFound > 0) do={
     :log warning "$configName - Review warnings above for potential issues"

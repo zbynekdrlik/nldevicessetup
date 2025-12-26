@@ -115,6 +115,48 @@ function Test-NpmPackageInstalled {
 #endregion
 
 #region Installation Functions
+function Ensure-MicrosoftStore {
+    Write-LogInfo "Ensuring Microsoft Store is installed..."
+
+    # Check if Store exists
+    $store = Get-AppxPackage -Name Microsoft.WindowsStore -ErrorAction SilentlyContinue
+    if ($store) {
+        Write-LogSuccess "Microsoft Store already installed"
+        return $true
+    }
+
+    # Method 1: Register by family name
+    Write-LogInfo "Registering Microsoft Store..."
+    try {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.WindowsStore_8wekyb3d8bbwe -ErrorAction Stop
+        Start-Sleep -Seconds 2
+        if (Get-AppxPackage -Name Microsoft.WindowsStore -ErrorAction SilentlyContinue) {
+            Write-LogSuccess "Microsoft Store registered"
+            return $true
+        }
+    }
+    catch {
+        Write-LogWarn "Store registration failed: $_"
+    }
+
+    # Method 2: wsreset -i (reinstalls Store)
+    Write-LogInfo "Reinstalling Microsoft Store via wsreset..."
+    try {
+        $process = Start-Process -FilePath "wsreset.exe" -ArgumentList "-i" -Wait -PassThru -NoNewWindow -ErrorAction Stop
+        Start-Sleep -Seconds 5
+        if (Get-AppxPackage -Name Microsoft.WindowsStore -ErrorAction SilentlyContinue) {
+            Write-LogSuccess "Microsoft Store reinstalled"
+            return $true
+        }
+    }
+    catch {
+        Write-LogWarn "wsreset -i failed: $_"
+    }
+
+    Write-LogWarn "Could not ensure Microsoft Store - winget may have issues"
+    return $false
+}
+
 function Install-Winget {
     Write-LogInfo "Checking winget..."
 
@@ -972,6 +1014,9 @@ function Main {
 
     #region Software Installation
     Write-LogSection "SOFTWARE INSTALLATION"
+
+    # 0. Ensure Microsoft Store is available (required for winget)
+    $null = Ensure-MicrosoftStore
 
     # 1. Install winget
     $null = Install-Winget

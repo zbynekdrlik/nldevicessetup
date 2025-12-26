@@ -171,7 +171,7 @@ main() {
                 ;;
             --dry-run)
                 dry_run="true"
-                DRY_RUN="true"
+                export DRY_RUN="true"
                 shift
                 ;;
             --modules|-m)

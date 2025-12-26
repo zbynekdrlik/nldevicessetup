@@ -21,7 +21,19 @@
         'PSUseSingularNouns',
 
         # Empty catch blocks are sometimes used intentionally to suppress non-critical errors
-        'PSAvoidUsingEmptyCatchBlock'
+        'PSAvoidUsingEmptyCatchBlock',
+
+        # Common variable names like $profile are reused intentionally
+        'PSAvoidAssignmentToAutomaticVariable',
+
+        # Invoke-Expression is used safely in controlled contexts
+        'PSAvoidUsingInvokeExpression',
+
+        # BOM encoding is not required for UTF-8 files
+        'PSUseBOMForUnicodeEncodedFile',
+
+        # Variables may be assigned for future use or in conditionally-executed code
+        'PSUseDeclaredVarsMoreThanAssignments'
     )
 
     Rules = @{

@@ -396,49 +396,66 @@ function Optimize-DisableTransparency {
 }
 
 function Optimize-NetworkAdapters {
-    Write-LogInfo "Optimizing network adapters..."
+    Write-LogInfo "Optimizing network adapters (registry-based, applies after reboot)..."
+    Write-LogWarn "NOTE: Some NIC settings apply after reboot to avoid disconnection"
 
+    # Global TCP/IP settings first (these are safe, no disconnect)
+    $tcpParams = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+    Set-RegistryValue -Path $tcpParams -Name 'TcpAckFrequency' -Value 1
+    Set-RegistryValue -Path $tcpParams -Name 'TCPNoDelay' -Value 1
+    Set-RegistryValue -Path $tcpParams -Name 'TcpDelAckTicks' -Value 0
+
+    # Disable network throttling (safe)
+    $mmcssPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'
+    Set-RegistryValue -Path $mmcssPath -Name 'NetworkThrottlingIndex' -Value 0xFFFFFFFF
+
+    # Per-adapter settings via registry (doesn't cause immediate disconnect)
     $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -or $_.Status -eq 'Disconnected' }
 
     foreach ($adapter in $adapters) {
         Write-LogInfo "  Configuring: $($adapter.Name)"
 
-        # Disable Energy Efficient Ethernet (Green Ethernet)
+        # Get adapter registry path
         try {
-            Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword '*EEE' -RegistryValue 0 -ErrorAction SilentlyContinue
-        } catch {}
+            $adapterGuid = $adapter.InterfaceGuid
+            $regBasePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
 
-        # Disable Energy Efficient Ethernet (alternate key)
-        try {
-            Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword 'EEE' -RegistryValue 0 -ErrorAction SilentlyContinue
-        } catch {}
+            # Find the adapter's registry key
+            Get-ChildItem $regBasePath -ErrorAction SilentlyContinue | ForEach-Object {
+                $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                if ($props.NetCfgInstanceId -eq $adapterGuid) {
+                    $adapterRegPath = $_.PSPath
 
-        # Disable Green Ethernet
-        try {
-            Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword 'GreenEthernet' -RegistryValue 0 -ErrorAction SilentlyContinue
-        } catch {}
+                    # Disable EEE (Energy Efficient Ethernet) - value 0
+                    Set-RegistryValue -Path $adapterRegPath -Name '*EEE' -Value '0' -Type 'String'
 
-        # Disable Power Saving Mode
-        try {
-            Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword '*PowerSavingMode' -RegistryValue 0 -ErrorAction SilentlyContinue
-        } catch {}
+                    # Disable Flow Control - value 0
+                    Set-RegistryValue -Path $adapterRegPath -Name '*FlowControl' -Value '0' -Type 'String'
 
-        # Disable Flow Control
-        try {
-            Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword '*FlowControl' -RegistryValue 0 -ErrorAction SilentlyContinue
-        } catch {}
+                    # Disable Interrupt Moderation - value 0
+                    Set-RegistryValue -Path $adapterRegPath -Name '*InterruptModeration' -Value '0' -Type 'String'
 
-        # Disable Interrupt Moderation (lower latency)
-        try {
-            Set-NetAdapterAdvancedProperty -Name $adapter.Name -RegistryKeyword '*InterruptModeration' -RegistryValue 0 -ErrorAction SilentlyContinue
-        } catch {}
+                    # Disable Power Saving - value 0
+                    Set-RegistryValue -Path $adapterRegPath -Name '*PowerSavingMode' -Value '0' -Type 'String'
+                    Set-RegistryValue -Path $adapterRegPath -Name 'EnablePME' -Value '0' -Type 'String'
+                    Set-RegistryValue -Path $adapterRegPath -Name 'WakeOnMagicPacket' -Value '0' -Type 'String'
+                    Set-RegistryValue -Path $adapterRegPath -Name 'WakeOnPattern' -Value '0' -Type 'String'
 
-        # Disable Large Send Offload v2
-        try {
-            Disable-NetAdapterLso -Name $adapter.Name -ErrorAction SilentlyContinue
-        } catch {}
+                    # Disable Green Ethernet
+                    Set-RegistryValue -Path $adapterRegPath -Name 'GreenEthernet' -Value '0' -Type 'String'
+                    Set-RegistryValue -Path $adapterRegPath -Name 'EnableGreenEthernet' -Value '0' -Type 'String'
 
-        # Disable adapter power management
+                    # Disable Large Send Offload
+                    Set-RegistryValue -Path $adapterRegPath -Name '*LsoV2IPv4' -Value '0' -Type 'String'
+                    Set-RegistryValue -Path $adapterRegPath -Name '*LsoV2IPv6' -Value '0' -Type 'String'
+                }
+            }
+        }
+        catch {
+            Write-LogWarn "  Could not configure adapter via registry: $($adapter.Name)"
+        }
+
+        # Disable adapter power management via PnP
         try {
             $pnpDevice = Get-PnpDevice | Where-Object { $_.FriendlyName -eq $adapter.InterfaceDescription }
             if ($pnpDevice) {
@@ -446,21 +463,12 @@ function Optimize-NetworkAdapters {
                 $regPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\$instanceId\Device Parameters"
                 Set-RegistryValue -Path $regPath -Name 'PnPCapabilities' -Value 24
             }
-        } catch {}
+        }
+        catch {}
     }
 
-    # Disable Nagle's Algorithm globally
-    $tcpParams = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
-    Set-RegistryValue -Path $tcpParams -Name 'TcpAckFrequency' -Value 1
-    Set-RegistryValue -Path $tcpParams -Name 'TCPNoDelay' -Value 1
-    Set-RegistryValue -Path $tcpParams -Name 'TcpDelAckTicks' -Value 0
-
-    # Disable network throttling
-    $mmcssPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'
-    Set-RegistryValue -Path $mmcssPath -Name 'NetworkThrottlingIndex' -Value 0xFFFFFFFF
-
-    Write-LogSuccess "Network adapters optimized"
-    $script:Results.Optimizations += 'Network: Green Ethernet, Flow Control, Power Saving disabled'
+    Write-LogSuccess "Network adapter settings configured (some require reboot)"
+    $script:Results.Optimizations += 'Network: EEE, Flow Control, Interrupt Mod, LSO disabled (reboot for NIC changes)'
 }
 
 function Optimize-DisableWindowsUpdate {
@@ -789,27 +797,29 @@ function Main {
     #region System Optimization
     Write-LogSection "SYSTEM OPTIMIZATION"
 
-    # Power and responsiveness
+    # Power and responsiveness (safe, no disconnect risk)
     Optimize-HighPerformancePower
     Optimize-PowerButtons
     Optimize-DisableUSBPowerSaving
 
-    # Visual
+    # Visual (safe)
     Optimize-VisualEffects
     Optimize-DarkMode
     Optimize-DisableTransparency
 
-    # Network
-    Optimize-NetworkAdapters
-    Optimize-QoSForVBAN
-
-    # Audio/latency
+    # Audio/latency (safe)
     Optimize-MMCSS
     Optimize-TimerResolution
 
-    # System
+    # System (safe)
     Optimize-DisableWindowsUpdate
     Optimize-DisableServices
+
+    # QoS (safe)
+    Optimize-QoSForVBAN
+
+    # Network adapters LAST (registry-based, some changes need reboot)
+    Optimize-NetworkAdapters
     #endregion
 
     Show-Summary

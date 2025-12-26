@@ -332,6 +332,37 @@ optimize_timer_resolution() {
 }
 #endregion
 
+#region Disable Power Buttons
+disable_power_buttons() {
+    log_info "Configuring power buttons to do nothing..."
+
+    local logind_conf="/etc/systemd/logind.conf.d/99-nldevicessetup.conf"
+    mkdir -p "$(dirname "$logind_conf")"
+
+    cat > "$logind_conf" << 'EOF'
+# NL Devices Setup - Disable power buttons
+# Prevent accidental shutdown/suspend during production
+
+[Login]
+HandlePowerKey=ignore
+HandleSuspendKey=ignore
+HandleHibernateKey=ignore
+HandleLidSwitch=ignore
+HandleLidSwitchExternalPower=ignore
+HandleLidSwitchDocked=ignore
+IdleAction=ignore
+EOF
+
+    # Restart logind to apply
+    systemctl restart systemd-logind 2>/dev/null || true
+
+    log_success "Power buttons configured to do nothing"
+    log_info "  - Power key: ignore"
+    log_info "  - Suspend key: ignore"
+    log_info "  - Lid switch: ignore"
+}
+#endregion
+
 #region Disable Unnecessary Services
 disable_unnecessary_services() {
     log_info "Checking unnecessary services..."
@@ -399,6 +430,7 @@ show_summary() {
     log_success "Optimizations Applied:"
     echo "  - CPU governor: performance"
     echo "  - USB/PCI power management: disabled"
+    echo "  - Power buttons/lid: do nothing"
     echo "  - Network buffers: optimized for low latency"
     echo "  - TCP: BBR, no slow start, low latency mode"
     echo "  - NIC settings: EEE off, flow control off, offloading off"
@@ -444,6 +476,9 @@ main() {
     configure_realtime_limits
     optimize_timer_resolution
     optimize_irq_affinity
+
+    log_section "POWER BUTTONS"
+    disable_power_buttons
 
     log_section "SERVICES"
     disable_unnecessary_services

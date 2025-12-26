@@ -124,6 +124,7 @@ function Install-Winget {
         return $true
     }
 
+    # Method 1: Try winget.pro installer
     Write-LogInfo "Installing winget via winget.pro..."
     try {
         Invoke-Expression (Invoke-RestMethod -Uri 'https://winget.pro')
@@ -136,7 +137,51 @@ function Install-Winget {
         }
     }
     catch {
-        Write-LogError "Failed to install winget: $_"
+        Write-LogWarn "winget.pro method failed: $_"
+    }
+
+    # Method 2: Register App Installer by family name (works on most Windows 10/11)
+    Write-LogInfo "Trying App Installer registration method..."
+    try {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop
+        Start-Sleep -Seconds 2
+
+        if (Test-CommandExists 'winget') {
+            Write-LogSuccess "winget installed via App Installer registration"
+            $script:Results.Installed += 'winget'
+            return $true
+        }
+    }
+    catch {
+        Write-LogWarn "App Installer registration failed: $_"
+    }
+
+    # Method 3: Direct MSIX download from GitHub
+    Write-LogInfo "Trying direct MSIX download..."
+    try {
+        $tempDir = "$env:TEMP\winget-install"
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+        # Get latest release URL
+        $releaseUrl = "https://api.github.com/repos/microsoft/winget-cli/releases/latest"
+        $release = Invoke-RestMethod -Uri $releaseUrl -ErrorAction Stop
+        $msixUrl = ($release.assets | Where-Object { $_.name -match '\.msixbundle$' }).browser_download_url
+
+        if ($msixUrl) {
+            $msixPath = "$tempDir\winget.msixbundle"
+            Invoke-WebRequest -Uri $msixUrl -OutFile $msixPath -ErrorAction Stop
+            Add-AppxPackage -Path $msixPath -ErrorAction Stop
+
+            if (Test-CommandExists 'winget') {
+                Write-LogSuccess "winget installed via direct download"
+                $script:Results.Installed += 'winget'
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                return $true
+            }
+        }
+    }
+    catch {
+        Write-LogWarn "Direct download method failed: $_"
     }
 
     $script:Results.Failed += 'winget'

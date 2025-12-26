@@ -426,6 +426,150 @@ optimize_irq_affinity() {
 }
 #endregion
 
+#region QoS Configuration (Dante/VBAN)
+configure_qos() {
+    log_info "Configuring QoS for Dante and VBAN..."
+
+    # Check if iptables is available
+    if ! command_exists iptables; then
+        log_warn "iptables not found - skipping QoS configuration"
+        return 1
+    fi
+
+    # DSCP Values:
+    # - DSCP 56 (CS7) = 0x38 = PTP/Clock sync (highest priority)
+    # - DSCP 46 (EF)  = 0x2e = Audio streams (expedited forwarding)
+    # - DSCP 8  (CS1) = 0x08 = Control/discovery (low priority)
+
+    # Clear existing nldevicessetup QoS rules
+    iptables -t mangle -F NLDEVICESSETUP_QOS 2>/dev/null || true
+    iptables -t mangle -D OUTPUT -j NLDEVICESSETUP_QOS 2>/dev/null || true
+    iptables -t mangle -X NLDEVICESSETUP_QOS 2>/dev/null || true
+
+    # Create QoS chain
+    iptables -t mangle -N NLDEVICESSETUP_QOS 2>/dev/null || true
+    iptables -t mangle -A OUTPUT -j NLDEVICESSETUP_QOS
+
+    # ===========================================
+    # PTP (Precision Time Protocol) - DSCP 56 (CS7)
+    # ===========================================
+    # PTP Event messages (port 319)
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 319 -j DSCP --set-dscp 56
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 319 -j DSCP --set-dscp 56
+    # PTP General messages (port 320)
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 320 -j DSCP --set-dscp 56
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 320 -j DSCP --set-dscp 56
+    log_success "PTP traffic marked with DSCP 56 (CS7)"
+
+    # ===========================================
+    # Dante Audio Streams - DSCP 46 (EF)
+    # ===========================================
+    # Dante primary audio (ports 14336-14600)
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 14336:14600 -j DSCP --set-dscp 46
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 14336:14600 -j DSCP --set-dscp 46
+    # Dante secondary audio (ports 4321, 4440)
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 4321 -j DSCP --set-dscp 46
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 4321 -j DSCP --set-dscp 46
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 4440 -j DSCP --set-dscp 46
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 4440 -j DSCP --set-dscp 46
+    log_success "Dante audio traffic marked with DSCP 46 (EF)"
+
+    # ===========================================
+    # VBAN Audio Streams - DSCP 46 (EF)
+    # ===========================================
+    # VBAN uses UDP ports 6980-6989
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 6980:6989 -j DSCP --set-dscp 46
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 6980:6989 -j DSCP --set-dscp 46
+    log_success "VBAN traffic marked with DSCP 46 (EF)"
+
+    # ===========================================
+    # Dante Control/Discovery - DSCP 8 (CS1)
+    # ===========================================
+    # Dante discovery/control (ports 8700-8708)
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 8700:8708 -j DSCP --set-dscp 8
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 8700:8708 -j DSCP --set-dscp 8
+    # Dante Controller (port 4455)
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 4455 -j DSCP --set-dscp 8
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 4455 -j DSCP --set-dscp 8
+    # mDNS for Dante discovery
+    iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 5353 -j DSCP --set-dscp 8
+    log_success "Dante control traffic marked with DSCP 8 (CS1)"
+
+    # ===========================================
+    # Persist QoS Rules
+    # ===========================================
+    local qos_script="/etc/nldevicessetup/qos-rules.sh"
+    mkdir -p "$(dirname "$qos_script")"
+
+    cat > "$qos_script" << 'EOFQOS'
+#!/bin/bash
+# NL Devices Setup - QoS Rules for Dante/VBAN
+# Auto-generated - do not edit manually
+
+# Clear existing rules
+iptables -t mangle -F NLDEVICESSETUP_QOS 2>/dev/null || true
+iptables -t mangle -D OUTPUT -j NLDEVICESSETUP_QOS 2>/dev/null || true
+iptables -t mangle -X NLDEVICESSETUP_QOS 2>/dev/null || true
+
+# Create chain
+iptables -t mangle -N NLDEVICESSETUP_QOS
+iptables -t mangle -A OUTPUT -j NLDEVICESSETUP_QOS
+
+# PTP - DSCP 56 (CS7)
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 319 -j DSCP --set-dscp 56
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 319 -j DSCP --set-dscp 56
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 320 -j DSCP --set-dscp 56
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 320 -j DSCP --set-dscp 56
+
+# Dante Audio - DSCP 46 (EF)
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 14336:14600 -j DSCP --set-dscp 46
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 14336:14600 -j DSCP --set-dscp 46
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 4321 -j DSCP --set-dscp 46
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 4321 -j DSCP --set-dscp 46
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 4440 -j DSCP --set-dscp 46
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 4440 -j DSCP --set-dscp 46
+
+# VBAN - DSCP 46 (EF)
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 6980:6989 -j DSCP --set-dscp 46
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 6980:6989 -j DSCP --set-dscp 46
+
+# Dante Control - DSCP 8 (CS1)
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 8700:8708 -j DSCP --set-dscp 8
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 8700:8708 -j DSCP --set-dscp 8
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 4455 -j DSCP --set-dscp 8
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --sport 4455 -j DSCP --set-dscp 8
+iptables -t mangle -A NLDEVICESSETUP_QOS -p udp --dport 5353 -j DSCP --set-dscp 8
+EOFQOS
+
+    chmod +x "$qos_script"
+
+    # Create systemd service for persistence
+    cat > /etc/systemd/system/nldevicessetup-qos.service << EOF
+[Unit]
+Description=NL Devices Setup QoS Rules (Dante/VBAN)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=$qos_script
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable nldevicessetup-qos.service 2>/dev/null || true
+    log_success "QoS rules persisted via systemd service"
+
+    log_info "QoS Configuration Summary:"
+    log_info "  PTP (ports 319-320):        DSCP 56 (CS7) - highest priority"
+    log_info "  Dante Audio (14336-14600):  DSCP 46 (EF)  - audio priority"
+    log_info "  VBAN (ports 6980-6989):     DSCP 46 (EF)  - audio priority"
+    log_info "  Dante Control (8700-8708):  DSCP 8  (CS1) - low priority"
+}
+#endregion
+
 #region Summary
 show_summary() {
     log_section "SETUP COMPLETE"
@@ -441,7 +585,14 @@ show_summary() {
     echo "  - Kernel scheduling: tuned for responsiveness"
     echo "  - Memory: low swappiness, fast writeback"
     echo "  - Realtime limits: configured for audio group"
+    echo "  - QoS: Dante/VBAN DSCP marking enabled"
     echo "  - DanteTimeSync: installed"
+    echo ""
+    log_info "QoS DSCP Markings:"
+    echo "  - PTP (319-320):       DSCP 56 (CS7)"
+    echo "  - Dante Audio:         DSCP 46 (EF)"
+    echo "  - VBAN (6980-6989):    DSCP 46 (EF)"
+    echo "  - Dante Control:       DSCP 8  (CS1)"
     echo ""
     log_info "Configuration files:"
     echo "  - $SYSCTL_CONF"
@@ -486,6 +637,9 @@ main() {
 
     log_section "SERVICES"
     disable_unnecessary_services
+
+    log_section "QOS CONFIGURATION"
+    configure_qos
 
     log_section "SOFTWARE INSTALLATION"
     install_dante_timesync

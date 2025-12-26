@@ -4,7 +4,18 @@
 # Usage: /import file-name=switch-optimize.rsc
 
 :local configName "nldevicessetup"
-:log info "$configName - Starting switch optimization..."
+:local issuesFound 0
+:local issuesFixed 0
+
+:log info "$configName - Starting switch optimization and audit..."
+
+# ===========================================
+# System Information
+# ===========================================
+:local identity [/system identity get name]
+:local version [/system resource get version]
+:local board [/system resource get board-name]
+:log info "$configName - Device: $identity ($board) running $version"
 
 # ===========================================
 # Flow Control (DISABLE for low-latency)
@@ -147,9 +158,181 @@
 }
 
 # ===========================================
-# Summary
+# Bridge Settings (IGMP Snooping, HW Offload)
 # ===========================================
-:log info "$configName - Switch optimization complete!"
-:log info "$configName - Dante QoS: PTP(TC7) > Audio(TC5) > Control(TC0)"
-:log info "$configName - Flow control: DISABLED"
-:log info "$configName - IGMP fast-leave: ENABLED"
+:log info "$configName - Checking bridge settings..."
+
+/interface bridge {
+    :foreach i in=[find] do={
+        :local brname [get $i name]
+
+        # Check IGMP snooping (should be enabled for multicast efficiency)
+        :local igmp [get $i igmp-snooping]
+        :if ($igmp != true) do={
+            :log info "$configName - Enabling IGMP snooping on $brname"
+            set $i igmp-snooping=yes
+            :set issuesFixed ($issuesFixed + 1)
+        }
+
+        # Check hardware offloading
+        :do {
+            :local hwoff [get $i hw-offload]
+            :if ($hwoff != true) do={
+                :log info "$configName - Enabling HW offload on bridge $brname"
+                set $i hw-offload=yes
+                :set issuesFixed ($issuesFixed + 1)
+            }
+        } on-error={}
+
+        # Check protocol mode (should be rstp or mstp for fast convergence)
+        :local proto [get $i protocol-mode]
+        :if ($proto = "none") do={
+            :log warning "$configName - Bridge $brname has no STP - consider enabling rstp"
+            :set issuesFound ($issuesFound + 1)
+        }
+
+        # Check multicast router (should be set for proper Dante multicast)
+        :local mcrouter [get $i multicast-router]
+        :if ($mcrouter != "permanent") do={
+            :log info "$configName - Setting multicast-router=permanent on $brname"
+            set $i multicast-router=permanent
+            :set issuesFixed ($issuesFixed + 1)
+        }
+    }
+}
+:log info "$configName - Bridge settings configured"
+
+# ===========================================
+# EEE (Energy Efficient Ethernet) - DISABLE
+# ===========================================
+:log info "$configName - Checking EEE (should be disabled for low-latency)..."
+
+/interface ethernet {
+    :foreach i in=[find] do={
+        :local ifname [get $i name]
+        :do {
+            :local eee [get $i eee]
+            :if ($eee != "disabled") do={
+                :log info "$configName - Disabling EEE on $ifname"
+                set $i eee=disabled
+                :set issuesFixed ($issuesFixed + 1)
+            }
+        } on-error={}
+    }
+}
+:log info "$configName - EEE check complete"
+
+# ===========================================
+# Loop Protection
+# ===========================================
+:log info "$configName - Checking loop protection..."
+
+/interface ethernet {
+    :foreach i in=[find] do={
+        :local ifname [get $i name]
+        :local lp [get $i loop-protect]
+        :if ($lp = "off") do={
+            :log warning "$configName - Loop protection disabled on $ifname (consider enabling)"
+            :set issuesFound ($issuesFound + 1)
+        }
+    }
+}
+
+# ===========================================
+# Port Speed/Duplex Verification
+# ===========================================
+:log info "$configName - Checking port link status..."
+
+/interface ethernet {
+    :foreach i in=[find where running=yes] do={
+        :local ifname [get $i name]
+        :local speed [get $i speed]
+        :local duplex [get $i full-duplex]
+        :if ($duplex != true) do={
+            :log warning "$configName - $ifname is running HALF-DUPLEX (bad for audio!)"
+            :set issuesFound ($issuesFound + 1)
+        }
+        :log info "$configName - $ifname: $speed, full-duplex=$duplex"
+    }
+}
+
+# ===========================================
+# L2MTU Check
+# ===========================================
+:log info "$configName - Checking L2MTU..."
+
+/interface ethernet {
+    :foreach i in=[find] do={
+        :local ifname [get $i name]
+        :local l2mtu [get $i l2mtu]
+        :if ($l2mtu < 1592) do={
+            :log warning "$configName - $ifname L2MTU=$l2mtu (should be >= 1592)"
+            :set issuesFound ($issuesFound + 1)
+        }
+    }
+}
+
+# ===========================================
+# MAC Table Aging
+# ===========================================
+:log info "$configName - Checking MAC aging time..."
+
+/interface bridge {
+    :foreach i in=[find] do={
+        :local brname [get $i name]
+        :local aging [get $i auto-mac]
+        # Just log current setting
+        :local ageTime [get $i mac-age]
+        :log info "$configName - Bridge $brname MAC aging: $ageTime"
+    }
+}
+
+# ===========================================
+# Switch Chip Verification
+# ===========================================
+:log info "$configName - Verifying switch chip settings..."
+
+/interface ethernet switch {
+    :foreach i in=[find] do={
+        :local swname [get $i name]
+        :local swtype [get $i type]
+        :local l3off [get $i l3-hw-offloading]
+        :local qosoff [get $i qos-hw-offloading]
+        :log info "$configName - Switch: $swname ($swtype)"
+        :log info "$configName -   L3 HW offload: $l3off"
+        :log info "$configName -   QoS HW offload: $qosoff"
+
+        :if ($qosoff != true) do={
+            :log warning "$configName - QoS HW offloading is DISABLED!"
+            :set issuesFound ($issuesFound + 1)
+        }
+    }
+}
+
+# ===========================================
+# Final Audit Summary
+# ===========================================
+:log info "==========================================="
+:log info "$configName - OPTIMIZATION COMPLETE"
+:log info "==========================================="
+:log info "$configName - Issues found: $issuesFound"
+:log info "$configName - Issues fixed: $issuesFixed"
+:log info ""
+:log info "$configName - Dante QoS Configuration:"
+:log info "  - PTP/Clock (DSCP 56): Traffic Class 7 (highest)"
+:log info "  - Audio (DSCP 46): Traffic Class 5 (high)"
+:log info "  - Control (DSCP 8): Traffic Class 0 (low)"
+:log info ""
+:log info "$configName - Optimizations Applied:"
+:log info "  - Flow control: DISABLED"
+:log info "  - IGMP snooping: ENABLED"
+:log info "  - IGMP fast-leave: ENABLED"
+:log info "  - HW offloading: ENABLED"
+:log info "  - EEE: DISABLED"
+:log info "  - Multicast router: PERMANENT"
+:log info ""
+:if ($issuesFound > 0) do={
+    :log warning "$configName - Review warnings above for potential issues"
+} else={
+    :log info "$configName - All checks passed!"
+}

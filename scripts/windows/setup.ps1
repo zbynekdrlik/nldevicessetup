@@ -1026,40 +1026,67 @@ function Install-NvidiaDrivers {
     Write-LogSuccess "Found NVIDIA GPU: $($nvidiaGPU.Name)"
     Write-LogInfo "Installing NVIDIA App for Studio Drivers..."
 
-    # Install NVIDIA App (replaces GeForce Experience, supports Studio Drivers)
-    try {
-        $installed = Install-WingetPackage -PackageId 'Nvidia.NvidiaApp' -DisplayName 'NVIDIA App'
+    # NVIDIA App is NOT available in winget (requires hardware validation)
+    # Direct download from NVIDIA servers
+    $installerPath = "$env:TEMP\NVIDIA_app_installer.exe"
 
-        if ($installed) {
-            Write-LogSuccess "NVIDIA App installed"
-            Write-LogInfo "NVIDIA App will allow you to switch to Studio Drivers:"
-            Write-LogInfo "  1. Open NVIDIA App"
-            Write-LogInfo "  2. Go to Settings > Driver Type"
-            Write-LogInfo "  3. Select 'Studio Driver' instead of 'Game Ready Driver'"
-            Write-LogInfo "  4. Check for updates to download Studio Driver"
+    # Try multiple download URLs (version may change)
+    $downloadUrls = @(
+        'https://us.download.nvidia.com/nvapp/client/11.0.1.189/NVIDIA_app_v11.0.1.189.exe',
+        'https://us.download.nvidia.com/nvapp/client/11.0.1.163/NVIDIA_app_v11.0.1.163.exe'
+    )
 
-            $script:Results.Optimizations += "NVIDIA: App installed (switch to Studio Driver in settings)"
-            return $true
+    $downloaded = $false
+    foreach ($url in $downloadUrls) {
+        try {
+            Write-LogInfo "Downloading NVIDIA App from $url..."
+            Invoke-WebRequest -Uri $url -OutFile $installerPath -UseBasicParsing -ErrorAction Stop
+            $downloaded = $true
+            break
+        }
+        catch {
+            Write-LogWarn "Failed to download from $url"
         }
     }
-    catch {
-        Write-LogWarn "Failed to install NVIDIA App: $_"
+
+    if (-not $downloaded) {
+        # Fallback: Try to get latest from NVIDIA website
+        try {
+            Write-LogInfo "Trying alternative download method..."
+            $webPage = Invoke-WebRequest -Uri 'https://www.nvidia.com/en-us/software/nvidia-app/' -UseBasicParsing
+            $match = [regex]::Match($webPage.Content, 'https://us\.download\.nvidia\.com/nvapp/client/[^"]+\.exe')
+            if ($match.Success) {
+                $latestUrl = $match.Value
+                Write-LogInfo "Found latest: $latestUrl"
+                Invoke-WebRequest -Uri $latestUrl -OutFile $installerPath -UseBasicParsing -ErrorAction Stop
+                $downloaded = $true
+            }
+        }
+        catch {
+            Write-LogWarn "Could not find download URL: $_"
+        }
     }
 
-    # Fallback: Try to install via direct download
-    Write-LogInfo "Attempting direct NVIDIA App download..."
+    if (-not $downloaded) {
+        Write-LogError "Failed to download NVIDIA App"
+        Write-LogInfo "Please download manually from: https://www.nvidia.com/en-us/software/nvidia-app/"
+        $script:Results.Failed += 'NVIDIA App download'
+        return $false
+    }
+
+    # Install silently
+    Write-LogInfo "Running NVIDIA App installer (silent)..."
     try {
-        $downloadUrl = 'https://us.download.nvidia.com/nvapp/client/11.0.1.163/NVIDIA_app_v11.0.1.163.exe'
-        $installerPath = "$env:TEMP\NVIDIA_app_installer.exe"
-
-        Write-LogInfo "Downloading NVIDIA App..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing
-
-        Write-LogInfo "Running NVIDIA App installer (silent)..."
         $process = Start-Process -FilePath $installerPath -ArgumentList '-s', '-noreboot' -Wait -PassThru
 
         if ($process.ExitCode -eq 0) {
             Write-LogSuccess "NVIDIA App installed successfully"
+            Write-LogInfo "To switch to Studio Drivers:"
+            Write-LogInfo "  1. Open NVIDIA App"
+            Write-LogInfo "  2. Go to Settings > Driver Type"
+            Write-LogInfo "  3. Select 'Studio Driver'"
+            Write-LogInfo "  4. Check for updates"
+
             $script:Results.Optimizations += "NVIDIA: App installed (switch to Studio Driver in settings)"
             return $true
         }
@@ -1068,7 +1095,7 @@ function Install-NvidiaDrivers {
         }
     }
     catch {
-        Write-LogWarn "Failed to download/install NVIDIA App: $_"
+        Write-LogWarn "Failed to run installer: $_"
     }
 
     $script:Results.Failed += 'NVIDIA App installation'

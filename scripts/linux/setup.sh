@@ -215,9 +215,6 @@ net.ipv4.udp_wmem_min = 8192
 # ===========================================
 # Kernel Scheduling (Low Latency)
 # ===========================================
-kernel.sched_min_granularity_ns = 1000000
-kernel.sched_wakeup_granularity_ns = 500000
-kernel.sched_migration_cost_ns = 50000
 kernel.sched_autogroup_enabled = 0
 
 # ===========================================
@@ -235,8 +232,15 @@ kernel.timer_migration = 0
 EOF
 
     # Apply sysctl settings
-    sysctl -p "$SYSCTL_CONF" &>/dev/null
+    sysctl -p "$SYSCTL_CONF" 2>/dev/null || true
     log_success "Network sysctl settings applied and persisted"
+
+    # Apply optional scheduler settings (may not exist on all kernels)
+    for param in "kernel.sched_min_granularity_ns=1000000" \
+                 "kernel.sched_wakeup_granularity_ns=500000" \
+                 "kernel.sched_migration_cost_ns=50000"; do
+        sysctl -w "$param" 2>/dev/null && log_success "Set $param" || true
+    done
 
     # Enable BBR if available
     if [[ -f /proc/sys/net/ipv4/tcp_available_congestion_control ]]; then

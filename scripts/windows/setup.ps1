@@ -802,6 +802,67 @@ function Optimize-DisableStartupItems {
     Write-LogSuccess "Startup items disabled: Edge, SecurityHealth, LogiLDA"
     $script:Results.Optimizations += 'Startup: Edge, SecurityHealth, LogiLDA disabled'
 }
+
+function Optimize-DisableFirewallAndRansomware {
+    Write-LogInfo "Disabling Windows Firewall (all profiles)..."
+
+    # Disable Windows Firewall on all profiles
+    try {
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction Stop
+        Write-LogSuccess "Windows Firewall disabled on all profiles"
+    }
+    catch {
+        # Fallback to netsh
+        try {
+            netsh advfirewall set allprofiles state off 2>$null | Out-Null
+            Write-LogSuccess "Windows Firewall disabled via netsh"
+        }
+        catch {
+            Write-LogWarn "Could not disable Windows Firewall: $_"
+        }
+    }
+
+    # Also disable via registry (persists)
+    $fwProfiles = @(
+        'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile',
+        'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile',
+        'HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile'
+    )
+
+    foreach ($profile in $fwProfiles) {
+        Set-RegistryValue -Path $profile -Name 'EnableFirewall' -Value 0
+    }
+
+    Write-LogInfo "Disabling Ransomware Protection (Controlled Folder Access)..."
+
+    # Disable Controlled Folder Access (Ransomware Protection)
+    try {
+        Set-MpPreference -EnableControlledFolderAccess Disabled -ErrorAction Stop
+        Write-LogSuccess "Controlled Folder Access disabled"
+    }
+    catch {
+        # Fallback to registry
+        $defenderPath = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access'
+        if (-not (Test-Path $defenderPath)) { $null = New-Item -Path $defenderPath -Force }
+        Set-RegistryValue -Path $defenderPath -Name 'EnableControlledFolderAccess' -Value 0
+        Write-LogSuccess "Controlled Folder Access disabled via registry"
+    }
+
+    # Disable other Defender real-time features that can cause latency
+    try {
+        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+        Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+        Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+        Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
+        Write-LogInfo "  Defender real-time monitoring reduced"
+    }
+    catch {
+        Write-LogWarn "  Could not modify Defender settings (may be managed by policy)"
+    }
+
+    $script:Results.Optimizations += 'Firewall: Disabled on all profiles'
+    $script:Results.Optimizations += 'Ransomware Protection: Disabled'
+}
 #endregion
 
 #region Main
@@ -930,6 +991,7 @@ function Main {
     Optimize-DisableWindowsUpdate
     Optimize-DisableServices
     Optimize-DisableStartupItems
+    Optimize-DisableFirewallAndRansomware
 
     # QoS (safe)
     Optimize-QoSForVBAN

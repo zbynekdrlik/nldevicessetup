@@ -79,12 +79,10 @@ function Set-RegistryValue {
         if (-not (Test-Path $Path)) {
             $null = New-Item -Path $Path -Force
         }
-        Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -ErrorAction Stop
-        return $true
+        $null = Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -ErrorAction Stop
     }
     catch {
         Write-LogWarn "Failed to set $Path\$Name : $_"
-        return $false
     }
 }
 
@@ -514,11 +512,11 @@ function Optimize-QoSForVBAN {
     # Create QoS policies with DSCP 46 (Expedited Forwarding - same as Dante)
     try {
         # VBAN policy
-        New-NetQosPolicy -Name 'VBAN Audio' -IPProtocol UDP -IPDstPortStart 6980 -IPDstPortEnd 6989 -DSCPAction 46 -NetworkProfile All -ErrorAction Stop
+        $null = New-NetQosPolicy -Name 'VBAN Audio' -IPProtocol UDP -IPDstPortStart 6980 -IPDstPortEnd 6989 -DSCPAction 46 -NetworkProfile All -ErrorAction Stop
         Write-LogSuccess "QoS policy created for VBAN (DSCP 46)"
 
         # Dante policy (ensure it exists)
-        New-NetQosPolicy -Name 'Dante Audio' -IPProtocol UDP -IPDstPortStart 14336 -IPDstPortEnd 14600 -DSCPAction 46 -NetworkProfile All -ErrorAction SilentlyContinue
+        $null = New-NetQosPolicy -Name 'Dante Audio' -IPProtocol UDP -IPDstPortStart 14336 -IPDstPortEnd 14600 -DSCPAction 46 -NetworkProfile All -ErrorAction SilentlyContinue
 
         $script:Results.Optimizations += 'QoS: VBAN + Dante DSCP 46 (EF)'
     }
@@ -527,11 +525,11 @@ function Optimize-QoSForVBAN {
 
         # Alternative: Use registry-based QoS
         $qosPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\QoS\VBAN Audio'
-        Set-RegistryValue -Path $qosPath -Name 'Version' -Value '1.0' -Type 'String'
-        Set-RegistryValue -Path $qosPath -Name 'Protocol' -Value 'UDP' -Type 'String'
-        Set-RegistryValue -Path $qosPath -Name 'Local Port' -Value '*' -Type 'String'
-        Set-RegistryValue -Path $qosPath -Name 'Remote Port' -Value '6980:6989' -Type 'String'
-        Set-RegistryValue -Path $qosPath -Name 'DSCP Value' -Value '46' -Type 'String'
+        $null = Set-RegistryValue -Path $qosPath -Name 'Version' -Value '1.0' -Type 'String'
+        $null = Set-RegistryValue -Path $qosPath -Name 'Protocol' -Value 'UDP' -Type 'String'
+        $null = Set-RegistryValue -Path $qosPath -Name 'Local Port' -Value '*' -Type 'String'
+        $null = Set-RegistryValue -Path $qosPath -Name 'Remote Port' -Value '6980:6989' -Type 'String'
+        $null = Set-RegistryValue -Path $qosPath -Name 'DSCP Value' -Value '46' -Type 'String'
 
         $script:Results.Optimizations += 'QoS: VBAN via registry (reboot may be needed)'
     }
@@ -765,33 +763,33 @@ function Main {
     Write-LogSection "SOFTWARE INSTALLATION"
 
     # 1. Install winget
-    Install-Winget
+    $null = Install-Winget
 
     # Refresh PATH for winget
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
     # 2. Install Process Lasso
-    Install-WingetPackage -PackageId 'Bitsum.ProcessLasso' -DisplayName 'Process Lasso'
-    Configure-ProcessLasso
+    $null = Install-WingetPackage -PackageId 'Bitsum.ProcessLasso' -DisplayName 'Process Lasso'
+    $null = Configure-ProcessLasso
 
     # 3. Install other apps
-    Install-WingetPackage -PackageId 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal'
-    Install-WingetPackage -PackageId 'RustDesk.RustDesk' -DisplayName 'RustDesk'
-    Install-WingetPackage -PackageId 'OpenJS.NodeJS.LTS' -DisplayName 'Node.js LTS'
-    Install-WingetPackage -PackageId 'Skillbrains.Lightshot' -DisplayName 'Lightshot'
+    $null = Install-WingetPackage -PackageId 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal'
+    $null = Install-WingetPackage -PackageId 'RustDesk.RustDesk' -DisplayName 'RustDesk'
+    $null = Install-WingetPackage -PackageId 'OpenJS.NodeJS' -DisplayName 'Node.js'
+    $null = Install-WingetPackage -PackageId 'Skillbrains.Lightshot' -DisplayName 'Lightshot'
 
     # Refresh PATH for Node.js
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
     # 4. Install npm packages
-    Install-NpmPackage -Package '@anthropic-ai/claude-code' -DisplayName 'Claude Code'
-    Install-NpmPackage -Package '@google/gemini-cli' -DisplayName 'Gemini CLI'
+    $null = Install-NpmPackage -Package '@anthropic-ai/claude-code' -DisplayName 'Claude Code'
+    $null = Install-NpmPackage -Package '@google/gemini-cli' -DisplayName 'Gemini CLI'
 
     # 5. Install SSH
-    Install-OpenSSH
+    $null = Install-OpenSSH
 
     # 6. Install DanteTimeSync
-    Install-DanteTimeSync
+    $null = Install-DanteTimeSync
     #endregion
 
     #region System Optimization

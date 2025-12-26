@@ -848,18 +848,6 @@ function Optimize-DisableFirewallAndRansomware {
         Write-LogSuccess "Controlled Folder Access disabled via registry"
     }
 
-    # Disable other Defender real-time features that can cause latency
-    try {
-        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
-        Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
-        Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
-        Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
-        Write-LogInfo "  Defender real-time monitoring reduced"
-    }
-    catch {
-        Write-LogWarn "  Could not modify Defender settings (may be managed by policy)"
-    }
-
     $script:Results.Optimizations += 'Firewall: Disabled on all profiles'
     $script:Results.Optimizations += 'Ransomware Protection: Disabled'
 }

@@ -38,8 +38,9 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
+          $settingsPath = ".psscriptanalyzer.psd1"
           $results = Get-ChildItem -Path . -Recurse -Include *.ps1 |
-            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Error,Warning }
+            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Settings $settingsPath }
           if ($results) {
             $results | Format-Table -AutoSize
             exit 1
@@ -80,7 +81,13 @@ jobs:
         run: |
           $testsPath = "tests/unit"
           if ((Test-Path $testsPath) -and (Get-ChildItem $testsPath -Filter *.Tests.ps1)) {
-            Invoke-Pester -Path $testsPath -OutputFormat NUnitXml -OutputFile TestResults.xml -CI
+            $config = New-PesterConfiguration
+            $config.Run.Path = $testsPath
+            $config.TestResult.Enabled = $true
+            $config.TestResult.OutputPath = "TestResults.xml"
+            $config.TestResult.OutputFormat = "NUnitXml"
+            $config.Run.Exit = $true
+            Invoke-Pester -Configuration $config
           } else {
             Write-Host "No Pester tests found, skipping"
           }

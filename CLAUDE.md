@@ -191,17 +191,35 @@ irm https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bo
 
 ## CI/CD Enforcement Policy
 
+### CRITICAL: GitHub Actions Must Always Pass
+
+**This is the #1 priority rule for this project:**
+
+1. **BEFORE starting any new task**: Check `gh run list` for failed workflows
+2. **AFTER every commit**: Verify all GitHub Actions pass before continuing
+3. **If Actions fail**: STOP all other work and fix CI immediately
+4. **NEVER deploy to devices** when GitHub Actions are failing
+
+**Rationale**: Deploying untested/unlinted code to production devices can cause system instability, network issues, or security vulnerabilities that are difficult to diagnose remotely.
+
 ### Zero Tolerance for Failures
 - **NEVER proceed with code changes when GitHub Actions are failing**
 - All CI checks must pass before any merge or deployment
 - Fix failing tests immediately - they are the highest priority
 - A failing pipeline is a blocker, not a warning
 
+### Workflow After Every Code Change
+1. Commit the change
+2. Wait for GitHub Actions to complete (or run checks locally first)
+3. If any workflow fails → fix immediately before ANY other work
+4. Only proceed to next task when ALL workflows show green
+
 ### Continuous Improvement
 - Regularly review and tighten CI/CD rules
 - Add new linting rules as patterns emerge
 - Increase test coverage requirements over time (target: 80%+)
 - Monitor for flaky tests and fix root causes immediately
+- Periodically audit workflow configurations for new best practices
 
 ### Test Coverage Requirements
 - New code must include corresponding tests
@@ -214,6 +232,16 @@ irm https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bo
 - Security vulnerabilities = build failure
 - Test failures = build failure
 - Coverage drop = build failure
+
+### Local Pre-Commit Checks
+Before pushing, always run locally:
+```bash
+# Bash scripts
+shellcheck -x scripts/**/*.sh
+
+# PowerShell scripts (on Windows)
+Invoke-ScriptAnalyzer -Path . -Recurse -Settings .psscriptanalyzer.psd1
+```
 
 ### Monitoring
 - Review GitHub Actions logs after every commit

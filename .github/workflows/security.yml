@@ -25,20 +25,9 @@ jobs:
         with:
           fail-on-severity: high
 
-  codeql:
-    name: CodeQL Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: javascript, python
-          queries: security-extended
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+  # Note: CodeQL removed - this repo contains only Bash/PowerShell scripts
+  # which are not supported by CodeQL. ShellCheck and PSScriptAnalyzer
+  # in ci.yml provide static analysis for these languages.
 
   secrets-scan:
     name: Secrets Scan

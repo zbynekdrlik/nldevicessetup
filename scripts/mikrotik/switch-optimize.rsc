@@ -166,13 +166,9 @@
     :foreach i in=[find] do={
         :local brname [get $i name]
 
-        # Check IGMP snooping (should be enabled for multicast efficiency)
+        # Log IGMP snooping status (not changed - user preference)
         :local igmp [get $i igmp-snooping]
-        :if ($igmp != true) do={
-            :log info "$configName - Enabling IGMP snooping on $brname"
-            set $i igmp-snooping=yes
-            :set issuesFixed ($issuesFixed + 1)
-        }
+        :log info "$configName - Bridge $brname IGMP snooping: $igmp"
 
         # Check hardware offloading
         :do {
@@ -325,7 +321,6 @@
 :log info ""
 :log info "$configName - Optimizations Applied:"
 :log info "  - Flow control: DISABLED"
-:log info "  - IGMP snooping: ENABLED"
 :log info "  - IGMP fast-leave: ENABLED"
 :log info "  - HW offloading: ENABLED"
 :log info "  - EEE: DISABLED"

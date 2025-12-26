@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint-bash:
+    name: Lint Bash Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          find . -name "*.sh" -type f | xargs shellcheck -x
+
+  lint-powershell:
+    name: Lint PowerShell Scripts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Get-ChildItem -Path . -Recurse -Include *.ps1 |
+            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Error,Warning }
+          if ($results) {
+            $results | Format-Table -AutoSize
+            exit 1
+          }
+
+  test-bash:
+    name: Test Bash Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats-core
+        run: |
+          git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+
+      - name: Run tests
+        run: |
+          if [ -d tests/unit ] && [ "$(ls -A tests/unit/*.bats 2>/dev/null)" ]; then
+            bats tests/unit/*.bats
+          else
+            echo "No bats tests found, skipping"
+          fi
+
+  test-powershell:
+    name: Test PowerShell Scripts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -Scope CurrentUser -MinimumVersion 5.0
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $testsPath = "tests/unit"
+          if ((Test-Path $testsPath) -and (Get-ChildItem $testsPath -Filter *.Tests.ps1)) {
+            Invoke-Pester -Path $testsPath -OutputFormat NUnitXml -OutputFile TestResults.xml -CI
+          } else {
+            Write-Host "No Pester tests found, skipping"
+          }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-powershell
+          path: TestResults.xml
+          if-no-files-found: ignore
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    needs: [test-bash]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+
+      - name: Generate coverage
+        run: |
+          mkdir -p coverage
+          # Coverage would be generated here when we have more comprehensive tests
+          echo "Coverage generation placeholder"
+
+      # - name: Upload to Codecov
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     directory: coverage
+      #     fail_ci_if_error: false
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Check for secrets
+        run: |
+          if grep -rE "(password|secret|api_key|token)\s*=\s*['\"][^'\"]+['\"]" --include="*.sh" --include="*.ps1" .; then
+            echo "Warning: Potential secrets found in code"
+            exit 1
+          fi
+          echo "No secrets detected"
+
+  validate-scripts:
+    name: Validate Script Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate bash syntax
+        run: |
+          find . -name "*.sh" -type f -exec bash -n {} \;
+
+      - name: Check file permissions
+        run: |
+          find scripts -name "*.sh" -type f ! -perm -u+x -print | while read f; do
+            echo "Warning: $f is not executable"
+          done

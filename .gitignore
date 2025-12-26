@@ -1,0 +1,41 @@
+# Credentials - NEVER COMMIT
+TARGETS.md
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+coverage/
+.nyc_output/
+TestResults/
+*.trx
+
+# Build artifacts
+dist/
+build/
+out/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# PowerShell
+*.ps1xml
+
+# Backup files
+*.bak
+*.backup

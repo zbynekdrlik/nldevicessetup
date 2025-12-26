@@ -938,6 +938,142 @@ function Optimize-DisableFirewallAndRansomware {
     $script:Results.Optimizations += 'Firewall: Disabled on all profiles'
     $script:Results.Optimizations += 'Ransomware Protection: Disabled'
 }
+
+function Set-AutoLogin {
+    Write-LogInfo "Configuring auto-login for current user..."
+
+    $username = $env:USERNAME
+    $password = 'newlevel'
+
+    # Set auto-login via registry
+    $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+
+    Set-RegistryValue -Path $winlogonPath -Name 'AutoAdminLogon' -Value '1' -Type 'String'
+    Set-RegistryValue -Path $winlogonPath -Name 'DefaultUserName' -Value $username -Type 'String'
+    Set-RegistryValue -Path $winlogonPath -Name 'DefaultPassword' -Value $password -Type 'String'
+    Set-RegistryValue -Path $winlogonPath -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -Type 'String'
+
+    # Remove any auto-logon count limit
+    try {
+        Remove-ItemProperty -Path $winlogonPath -Name 'AutoLogonCount' -ErrorAction SilentlyContinue
+    } catch {}
+
+    # Set the user password
+    try {
+        $user = [ADSI]"WinNT://./$username,user"
+        $user.SetPassword($password)
+        $user.SetInfo()
+        Write-LogSuccess "Password set for $username"
+    }
+    catch {
+        # Try net user as fallback
+        try {
+            $null = net user $username $password 2>$null
+            Write-LogSuccess "Password set for $username (via net user)"
+        }
+        catch {
+            Write-LogWarn "Could not set password for $username : $_"
+        }
+    }
+
+    Write-LogSuccess "Auto-login configured for $username"
+    $script:Results.Optimizations += "Auto-login: Enabled for $username"
+}
+
+function Set-UACNeverNotify {
+    Write-LogInfo "Setting UAC to never notify..."
+
+    $uacPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+
+    # EnableLUA = 0 completely disables UAC (not recommended, can break some apps)
+    # Instead, we set notification level to "Never notify" while keeping UAC enabled
+    # ConsentPromptBehaviorAdmin:
+    #   0 = Elevate without prompting (silent elevation for admins)
+    #   1 = Prompt for credentials on secure desktop
+    #   2 = Prompt for consent on secure desktop
+    #   3 = Prompt for credentials
+    #   4 = Prompt for consent
+    #   5 = Prompt for consent for non-Windows binaries (default)
+    # PromptOnSecureDesktop:
+    #   0 = Disabled (no secure desktop)
+    #   1 = Enabled
+
+    Set-RegistryValue -Path $uacPath -Name 'ConsentPromptBehaviorAdmin' -Value 0
+    Set-RegistryValue -Path $uacPath -Name 'ConsentPromptBehaviorUser' -Value 0
+    Set-RegistryValue -Path $uacPath -Name 'PromptOnSecureDesktop' -Value 0
+    Set-RegistryValue -Path $uacPath -Name 'EnableInstallerDetection' -Value 0
+
+    # Keep UAC enabled but silent
+    Set-RegistryValue -Path $uacPath -Name 'EnableLUA' -Value 1
+
+    Write-LogSuccess "UAC set to never notify (silent elevation)"
+    $script:Results.Optimizations += 'UAC: Never notify (silent elevation)'
+}
+
+function Install-NvidiaDrivers {
+    Write-LogInfo "Checking for NVIDIA graphics card..."
+
+    # Check for NVIDIA GPU
+    $nvidiaGPU = Get-CimInstance -ClassName Win32_VideoController | Where-Object {
+        $_.Name -match 'NVIDIA' -or $_.Description -match 'NVIDIA'
+    }
+
+    if (-not $nvidiaGPU) {
+        Write-LogInfo "No NVIDIA graphics card detected - skipping driver installation"
+        return $false
+    }
+
+    Write-LogSuccess "Found NVIDIA GPU: $($nvidiaGPU.Name)"
+    Write-LogInfo "Installing NVIDIA App for Studio Drivers..."
+
+    # Install NVIDIA App (replaces GeForce Experience, supports Studio Drivers)
+    try {
+        $installed = Install-WingetPackage -PackageId 'Nvidia.NvidiaApp' -DisplayName 'NVIDIA App'
+
+        if ($installed) {
+            Write-LogSuccess "NVIDIA App installed"
+            Write-LogInfo "NVIDIA App will allow you to switch to Studio Drivers:"
+            Write-LogInfo "  1. Open NVIDIA App"
+            Write-LogInfo "  2. Go to Settings > Driver Type"
+            Write-LogInfo "  3. Select 'Studio Driver' instead of 'Game Ready Driver'"
+            Write-LogInfo "  4. Check for updates to download Studio Driver"
+
+            $script:Results.Optimizations += "NVIDIA: App installed (switch to Studio Driver in settings)"
+            return $true
+        }
+    }
+    catch {
+        Write-LogWarn "Failed to install NVIDIA App: $_"
+    }
+
+    # Fallback: Try to install via direct download
+    Write-LogInfo "Attempting direct NVIDIA App download..."
+    try {
+        $downloadUrl = 'https://us.download.nvidia.com/nvapp/client/11.0.1.163/NVIDIA_app_v11.0.1.163.exe'
+        $installerPath = "$env:TEMP\NVIDIA_app_installer.exe"
+
+        Write-LogInfo "Downloading NVIDIA App..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath -UseBasicParsing
+
+        Write-LogInfo "Running NVIDIA App installer (silent)..."
+        $process = Start-Process -FilePath $installerPath -ArgumentList '-s', '-noreboot' -Wait -PassThru
+
+        if ($process.ExitCode -eq 0) {
+            Write-LogSuccess "NVIDIA App installed successfully"
+            $script:Results.Optimizations += "NVIDIA: App installed (switch to Studio Driver in settings)"
+            return $true
+        }
+        else {
+            Write-LogWarn "NVIDIA App installer exited with code: $($process.ExitCode)"
+        }
+    }
+    catch {
+        Write-LogWarn "Failed to download/install NVIDIA App: $_"
+    }
+
+    $script:Results.Failed += 'NVIDIA App installation'
+    return $false
+}
 #endregion
 
 #region Main
@@ -1072,11 +1208,18 @@ function Main {
     Optimize-DisableStartupItems
     Optimize-DisableFirewallAndRansomware
 
+    # Security/Login
+    Set-UACNeverNotify
+    Set-AutoLogin
+
     # QoS (safe)
     Optimize-QoSForVBAN
 
     # Network adapters LAST (registry-based, some changes need reboot)
     Optimize-NetworkAdapters
+
+    # GPU Drivers (if NVIDIA detected)
+    Install-NvidiaDrivers
     #endregion
 
     Show-Summary

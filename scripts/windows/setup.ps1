@@ -559,8 +559,9 @@ function Optimize-NetworkAdapters {
                     # Disable Flow Control - value 0
                     Set-RegistryValue -Path $adapterRegPath -Name '*FlowControl' -Value '0' -Type 'String'
 
-                    # Disable Interrupt Moderation - value 0
-                    Set-RegistryValue -Path $adapterRegPath -Name '*InterruptModeration' -Value '0' -Type 'String'
+                    # Enable Interrupt Moderation - value 1
+                    # (Batches interrupts to reduce CPU overhead; acceptable tradeoff for most production use)
+                    Set-RegistryValue -Path $adapterRegPath -Name '*InterruptModeration' -Value '1' -Type 'String'
 
                     # Disable Power Saving - value 0
                     Set-RegistryValue -Path $adapterRegPath -Name '*PowerSavingMode' -Value '0' -Type 'String'
@@ -595,7 +596,7 @@ function Optimize-NetworkAdapters {
     }
 
     Write-LogSuccess "Network adapter settings configured (some require reboot)"
-    $script:Results.Optimizations += 'Network: EEE, Flow Control, Interrupt Mod, LSO disabled (reboot for NIC changes)'
+    $script:Results.Optimizations += 'Network: EEE, Flow Control, LSO, Power Saving disabled; Interrupt Mod enabled (reboot for NIC changes)'
 }
 
 function Optimize-DisableWindowsUpdate {

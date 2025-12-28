@@ -160,7 +160,17 @@ function Ensure-MicrosoftStore {
 function Install-Winget {
     Write-LogInfo "Checking winget..."
 
-    if (Test-CommandExists 'winget') {
+    # Helper to refresh PATH and check winget
+    $refreshAndCheck = {
+        # Add WindowsApps to PATH (where winget.exe lives)
+        $windowsApps = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+        if ($env:Path -notlike "*$windowsApps*") {
+            $env:Path = "$env:Path;$windowsApps"
+        }
+        return Test-CommandExists 'winget'
+    }
+
+    if (& $refreshAndCheck) {
         Write-LogSuccess "winget already installed"
         $script:Results.AlreadyInstalled += 'winget'
         return $true
@@ -172,7 +182,7 @@ function Install-Winget {
         Invoke-Expression (Invoke-RestMethod -Uri 'https://winget.pro')
         Start-Sleep -Seconds 3
 
-        if (Test-CommandExists 'winget') {
+        if (& $refreshAndCheck) {
             Write-LogSuccess "winget installed successfully"
             $script:Results.Installed += 'winget'
             return $true
@@ -188,7 +198,7 @@ function Install-Winget {
         Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop
         Start-Sleep -Seconds 2
 
-        if (Test-CommandExists 'winget') {
+        if (& $refreshAndCheck) {
             Write-LogSuccess "winget installed via App Installer registration"
             $script:Results.Installed += 'winget'
             return $true
@@ -214,7 +224,7 @@ function Install-Winget {
             Invoke-WebRequest -Uri $msixUrl -OutFile $msixPath -ErrorAction Stop
             Add-AppxPackage -Path $msixPath -ErrorAction Stop
 
-            if (Test-CommandExists 'winget') {
+            if (& $refreshAndCheck) {
                 Write-LogSuccess "winget installed via direct download"
                 $script:Results.Installed += 'winget'
                 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -235,6 +245,13 @@ function Install-WingetPackage {
         [string]$PackageId,
         [string]$DisplayName
     )
+
+    # Check if winget is available
+    if (-not (Test-CommandExists 'winget')) {
+        Write-LogWarn "winget not available, skipping $DisplayName"
+        $script:Results.Failed += "$DisplayName (winget unavailable)"
+        return $false
+    }
 
     Write-LogInfo "Checking $DisplayName..."
 
@@ -1227,8 +1244,13 @@ function Main {
     # 1. Install winget
     $null = Install-Winget
 
-    # Refresh PATH for winget
+    # Refresh PATH for winget (include WindowsApps where winget lives)
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    # Explicitly add WindowsApps if not in PATH (winget location)
+    $windowsApps = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+    if ($env:Path -notlike "*$windowsApps*") {
+        $env:Path = "$env:Path;$windowsApps"
+    }
 
     # 2. Install Process Lasso
     $null = Install-WingetPackage -PackageId 'Bitsum.ProcessLasso' -DisplayName 'Process Lasso'

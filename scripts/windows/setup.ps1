@@ -1238,10 +1238,13 @@ function Main {
     #region Software Installation
     Write-LogSection "SOFTWARE INSTALLATION"
 
-    # 0. Ensure Microsoft Store is available (required for winget)
+    # 0. Install SSH FIRST (enables remote debugging if script fails)
+    $null = Install-OpenSSH
+
+    # 1. Ensure Microsoft Store is available (required for winget)
     $null = Ensure-MicrosoftStore
 
-    # 1. Install winget
+    # 2. Install winget
     $null = Install-Winget
 
     # Refresh PATH for winget (include WindowsApps where winget lives)
@@ -1252,11 +1255,11 @@ function Main {
         $env:Path = "$env:Path;$windowsApps"
     }
 
-    # 2. Install Process Lasso
+    # 3. Install Process Lasso
     $null = Install-WingetPackage -PackageId 'Bitsum.ProcessLasso' -DisplayName 'Process Lasso'
     $null = Configure-ProcessLasso
 
-    # 3. Install other apps
+    # 4. Install other apps
     $null = Install-WingetPackage -PackageId 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal'
     $null = Install-WingetPackage -PackageId 'RustDesk.RustDesk' -DisplayName 'RustDesk'
     $null = Install-WingetPackage -PackageId 'OpenJS.NodeJS' -DisplayName 'Node.js'
@@ -1266,12 +1269,9 @@ function Main {
     # Refresh PATH for Node.js
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
-    # 4. Install npm packages
+    # 5. Install npm packages
     $null = Install-NpmPackage -Package '@anthropic-ai/claude-code' -DisplayName 'Claude Code'
     $null = Install-NpmPackage -Package '@google/gemini-cli' -DisplayName 'Gemini CLI'
-
-    # 5. Install SSH
-    $null = Install-OpenSSH
 
     # 6. Install DanteTimeSync
     $null = Install-DanteTimeSync

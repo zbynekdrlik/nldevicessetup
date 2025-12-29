@@ -377,7 +377,7 @@ function Install-NpmPackage {
 function Install-DanteTimeSync {
     Write-LogInfo "Installing DanteTimeSync..."
     try {
-        Invoke-Expression (Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.ps1')
+        Invoke-Expression (Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.ps1')
         Write-LogSuccess "DanteTimeSync installed"
         $script:Results.Installed += 'DanteTimeSync'
         return $true

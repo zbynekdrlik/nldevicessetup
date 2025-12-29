@@ -398,7 +398,7 @@ install_dante_timesync() {
         return 0
     fi
 
-    if curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantetimesync/master/install.sh | bash; then
+    if curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.sh | bash; then
         log_success "DanteTimeSync installed"
     else
         log_warn "Failed to install DanteTimeSync"

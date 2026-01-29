@@ -6,7 +6,7 @@
 set -euo pipefail
 
 #region Configuration
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 SYSCTL_CONF="/etc/sysctl.d/99-nldevicessetup.conf"
 LIMITS_CONF="/etc/security/limits.d/99-nldevicessetup.conf"
 UDEV_CONF="/etc/udev/rules.d/99-nldevicessetup.rules"
@@ -367,6 +367,198 @@ EOF
 }
 #endregion
 
+#region Disable Screen Timeout
+disable_screen_timeout() {
+    log_info "Disabling screen timeout and screensaver..."
+
+    # GNOME settings (requires running as the desktop user, not just root)
+    # We'll create a script that runs on user login
+    local autostart_dir="/etc/xdg/autostart"
+    mkdir -p "$autostart_dir"
+
+    cat > "$autostart_dir/nldevicessetup-screen.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=NL Devices Setup - Disable Screen Timeout
+Exec=/etc/nldevicessetup/disable-screen-timeout.sh
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    local screen_script="/etc/nldevicessetup/disable-screen-timeout.sh"
+    mkdir -p "$(dirname "$screen_script")"
+
+    cat > "$screen_script" << 'EOF'
+#!/bin/bash
+# Disable screen timeout for GNOME/X11
+
+# GNOME settings
+if command -v gsettings &>/dev/null; then
+    gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+    gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+    gsettings set org.gnome.desktop.screensaver idle-activation-enabled false 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing' 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.power idle-dim false 2>/dev/null || true
+fi
+
+# X11 settings
+if command -v xset &>/dev/null; then
+    xset s off 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+    xset s noblank 2>/dev/null || true
+fi
+EOF
+
+    chmod +x "$screen_script"
+
+    # Disable systemd sleep/suspend targets
+    systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+
+    # Try to run immediately if we have DISPLAY
+    if [[ -n "${DISPLAY:-}" ]]; then
+        "$screen_script" 2>/dev/null || true
+    fi
+
+    log_success "Screen timeout disabled"
+    log_info "  - GNOME idle-delay: 0"
+    log_info "  - Screensaver: disabled"
+    log_info "  - Sleep targets: masked"
+}
+#endregion
+
+#region Configure Auto Login
+configure_auto_login() {
+    local target_user="${1:-}"
+
+    # Try to detect the user
+    if [[ -z "$target_user" ]]; then
+        target_user="${SUDO_USER:-}"
+    fi
+    if [[ -z "$target_user" ]]; then
+        target_user=$(logname 2>/dev/null || true)
+    fi
+    if [[ -z "$target_user" ]] || [[ "$target_user" == "root" ]]; then
+        # Try to find a non-root user with UID >= 1000
+        target_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}')
+    fi
+
+    if [[ -z "$target_user" ]]; then
+        log_warn "Could not determine user for auto-login - skipping"
+        return 1
+    fi
+
+    log_info "Configuring auto-login for user: $target_user"
+
+    # GDM3 (GNOME Display Manager)
+    local gdm_conf="/etc/gdm3/custom.conf"
+    if [[ -f "$gdm_conf" ]]; then
+        # Backup
+        cp "$gdm_conf" "${gdm_conf}.bak" 2>/dev/null || true
+
+        # Check if [daemon] section exists
+        if grep -q '^\[daemon\]' "$gdm_conf"; then
+            # Remove existing auto-login settings
+            sed -i '/^AutomaticLoginEnable=/d' "$gdm_conf"
+            sed -i '/^AutomaticLogin=/d' "$gdm_conf"
+            # Add after [daemon]
+            sed -i "/^\[daemon\]/a AutomaticLoginEnable=True\nAutomaticLogin=$target_user" "$gdm_conf"
+        else
+            # Add [daemon] section
+            echo -e "\n[daemon]\nAutomaticLoginEnable=True\nAutomaticLogin=$target_user" >> "$gdm_conf"
+        fi
+        log_success "GDM3 auto-login configured for $target_user"
+    fi
+
+    # LightDM
+    if command_exists lightdm; then
+        local lightdm_conf="/etc/lightdm/lightdm.conf.d/99-nldevicessetup.conf"
+        mkdir -p "$(dirname "$lightdm_conf")"
+
+        cat > "$lightdm_conf" << EOF
+[Seat:*]
+autologin-user=$target_user
+autologin-user-timeout=0
+EOF
+        log_success "LightDM auto-login configured for $target_user"
+    fi
+
+    # SDDM (KDE)
+    local sddm_conf="/etc/sddm.conf.d/99-nldevicessetup.conf"
+    if command_exists sddm; then
+        mkdir -p "$(dirname "$sddm_conf")"
+
+        cat > "$sddm_conf" << EOF
+[Autologin]
+User=$target_user
+Session=
+EOF
+        log_success "SDDM auto-login configured for $target_user"
+    fi
+
+    log_info "Auto-login will take effect on next reboot"
+}
+#endregion
+
+#region Optimize Docker
+optimize_docker() {
+    log_info "Optimizing Docker daemon..."
+
+    if ! command_exists docker; then
+        log_warn "Docker not installed - skipping Docker optimization"
+        return 0
+    fi
+
+    local docker_conf="/etc/docker/daemon.json"
+    mkdir -p "$(dirname "$docker_conf")"
+
+    # Backup existing config
+    if [[ -f "$docker_conf" ]]; then
+        cp "$docker_conf" "${docker_conf}.bak.$(date +%Y%m%d_%H%M%S)"
+        log_info "Backed up existing Docker config"
+    fi
+
+    cat > "$docker_conf" << 'EOF'
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+    },
+    "storage-driver": "overlay2",
+    "live-restore": true,
+    "default-ulimits": {
+        "nofile": {
+            "Name": "nofile",
+            "Hard": 65536,
+            "Soft": 65536
+        },
+        "memlock": {
+            "Name": "memlock",
+            "Hard": -1,
+            "Soft": -1
+        }
+    },
+    "default-shm-size": "256M"
+}
+EOF
+
+    # Restart Docker to apply (only if it was running)
+    if systemctl is-active docker &>/dev/null; then
+        log_info "Restarting Docker daemon..."
+        systemctl restart docker 2>/dev/null || true
+    fi
+
+    log_success "Docker daemon optimized"
+    log_info "  - Log rotation: 10MB x 3 files"
+    log_info "  - Storage driver: overlay2"
+    log_info "  - Live restore: enabled (containers survive daemon restart)"
+    log_info "  - ulimits: nofile=65536, memlock=unlimited"
+    log_info "  - Default SHM size: 256MB"
+}
+#endregion
+
 #region Disable Unnecessary Services
 disable_unnecessary_services() {
     log_info "Checking unnecessary services..."
@@ -579,6 +771,9 @@ show_summary() {
     echo "  - CPU governor: performance"
     echo "  - USB/PCI power management: disabled"
     echo "  - Power buttons/lid: do nothing"
+    echo "  - Screen timeout/screensaver: disabled"
+    echo "  - Sleep/suspend/hibernate: masked"
+    echo "  - Auto-login: configured"
     echo "  - Network buffers: optimized for low latency"
     echo "  - TCP: BBR, no slow start, low latency mode"
     echo "  - NIC settings: EEE off, flow control off, offloading off"
@@ -586,6 +781,7 @@ show_summary() {
     echo "  - Memory: low swappiness, fast writeback"
     echo "  - Realtime limits: configured for audio group"
     echo "  - QoS: Dante/VBAN DSCP marking enabled"
+    echo "  - Docker: log rotation, live-restore, ulimits"
     echo "  - DanteTimeSync: installed"
     echo ""
     log_info "QoS DSCP Markings:"
@@ -632,11 +828,18 @@ main() {
     optimize_timer_resolution
     optimize_irq_affinity
 
-    log_section "POWER BUTTONS"
+    log_section "POWER BUTTONS & SCREEN"
     disable_power_buttons
+    disable_screen_timeout
+
+    log_section "AUTO LOGIN"
+    configure_auto_login
 
     log_section "SERVICES"
     disable_unnecessary_services
+
+    log_section "DOCKER OPTIMIZATION"
+    optimize_docker
 
     log_section "QOS CONFIGURATION"
     configure_qos

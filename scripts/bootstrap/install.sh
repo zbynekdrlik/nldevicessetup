@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # NL Devices Setup - Linux Bootstrap Installer
-# Usage: curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | bash
-#    or: curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | bash -s -- --help
+# Usage: curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | sudo bash
+#    or: curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | sudo bash -s -- --help
 
 set -euo pipefail
 
@@ -27,38 +27,40 @@ show_help() {
 NL Devices Setup - Linux Bootstrap Installer
 
 Usage:
-    curl -sSL ${RAW_URL}/scripts/bootstrap/install.sh | bash
-    curl -sSL ${RAW_URL}/scripts/bootstrap/install.sh | bash -s -- [OPTIONS]
+    curl -sSL ${RAW_URL}/scripts/bootstrap/install.sh | sudo bash
+    curl -sSL ${RAW_URL}/scripts/bootstrap/install.sh | sudo bash -s -- [OPTIONS]
 
 Options:
     --help          Show this help message
     --version VER   Install specific version (default: latest)
     --dir DIR       Installation directory (default: /opt/nldevicessetup)
     --dry-run       Show what would be done without making changes
-    --optimize      Run optimization after installation
+    --setup         Run full production setup after installation (recommended)
     --modules MOD   Comma-separated list of modules to apply (default: all)
 
-Modules:
-    network         Network stack optimizations
-    latency         Low-latency kernel parameters
-    filesystem      Filesystem tuning
-    realtime        Realtime scheduling setup
-    all             All modules (default)
-
 Examples:
-    # Install and optimize
-    curl -sSL ... | bash -s -- --optimize
+    # Install and run full setup (recommended)
+    curl -sSL ... | sudo bash -s -- --setup
+
+    # Install only (run setup later with: sudo nldevicessetup)
+    curl -sSL ... | sudo bash
 
     # Install specific version
-    curl -sSL ... | bash -s -- --version v1.0.0
-
-    # Only apply network tuning
-    curl -sSL ... | bash -s -- --optimize --modules network
+    curl -sSL ... | sudo bash -s -- --version v1.0.0
 
 EOF
 }
 
-check_requirements() {
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_error "This script must be run as root. Use:"
+        log_error "  curl -sSL ${RAW_URL}/scripts/bootstrap/install.sh | sudo bash"
+        exit 1
+    fi
+}
+
+install_requirements() {
+    # Auto-install git and curl if missing
     local missing=()
 
     for cmd in curl git; do
@@ -67,14 +69,35 @@ check_requirements() {
         fi
     done
 
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Missing required commands: ${missing[*]}"
-        log_info "Install them with your package manager:"
-        log_info "  apt install ${missing[*]}    # Debian/Ubuntu"
-        log_info "  dnf install ${missing[*]}    # Fedora/RHEL"
-        log_info "  pacman -S ${missing[*]}      # Arch"
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    log_info "Installing missing requirements: ${missing[*]}"
+
+    # Detect package manager and install
+    if command -v apt-get &>/dev/null; then
+        apt-get update -qq 2>/dev/null || true
+        apt-get install -y -qq "${missing[@]}" 2>/dev/null
+    elif command -v dnf &>/dev/null; then
+        dnf install -y -q "${missing[@]}" 2>/dev/null
+    elif command -v pacman &>/dev/null; then
+        pacman -Sy --noconfirm "${missing[@]}" 2>/dev/null
+    else
+        log_error "Could not auto-install: ${missing[*]}"
+        log_error "Please install them manually and re-run."
         exit 1
     fi
+
+    # Verify installation
+    for cmd in "${missing[@]}"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            log_error "Failed to install $cmd"
+            exit 1
+        fi
+    done
+
+    log_success "Requirements installed: ${missing[*]}"
 }
 
 get_latest_version() {
@@ -110,47 +133,34 @@ install_nldevicessetup() {
     # Make scripts executable
     find "$install_dir/scripts" -name "*.sh" -exec chmod +x {} \;
 
-    # Create symlink for easy access
+    # Create symlink for easy access (points to full setup script)
     if [[ -d /usr/local/bin ]]; then
-        ln -sf "$install_dir/scripts/linux/optimize.sh" /usr/local/bin/nldevicessetup 2>/dev/null || true
+        ln -sf "$install_dir/scripts/linux/setup.sh" /usr/local/bin/nldevicessetup 2>/dev/null || true
     fi
 
     log_success "Installation complete!"
 }
 
-run_optimization() {
+run_setup() {
     local install_dir="$1"
-    local modules="$2"
-    local dry_run="$3"
 
-    log_info "Running optimization (modules: $modules, dry-run: $dry_run)"
+    log_info "Running full production setup..."
 
-    local optimize_script="$install_dir/scripts/linux/optimize.sh"
+    local setup_script="$install_dir/scripts/linux/setup.sh"
 
-    if [[ ! -x "$optimize_script" ]]; then
-        log_error "Optimization script not found: $optimize_script"
+    if [[ ! -x "$setup_script" ]]; then
+        log_error "Setup script not found: $setup_script"
         exit 1
     fi
 
-    local args=()
-    [[ "$dry_run" == "true" ]] && args+=("--dry-run")
-    [[ "$modules" != "all" ]] && args+=("--modules" "$modules")
-
-    # Need root for optimization
-    if [[ $EUID -ne 0 ]]; then
-        log_warn "Optimization requires root privileges"
-        sudo "$optimize_script" "${args[@]}"
-    else
-        "$optimize_script" "${args[@]}"
-    fi
+    "$setup_script"
 }
 
 main() {
     local version="$VERSION"
     local install_dir="$INSTALL_DIR"
     local dry_run="false"
-    local optimize="false"
-    local modules="all"
+    local run_setup_flag="false"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -171,13 +181,9 @@ main() {
                 dry_run="true"
                 shift
                 ;;
-            --optimize|-o)
-                optimize="true"
+            --setup|-s|--optimize|-o)
+                run_setup_flag="true"
                 shift
-                ;;
-            --modules|-m)
-                modules="$2"
-                shift 2
                 ;;
             *)
                 log_error "Unknown option: $1"
@@ -196,7 +202,8 @@ main() {
     echo "                                                                     |_|    "
     echo ""
 
-    check_requirements
+    require_root
+    install_requirements
 
     if [[ "$version" == "latest" ]]; then
         version=$(get_latest_version)
@@ -206,21 +213,21 @@ main() {
     if [[ "$dry_run" == "true" ]]; then
         log_info "[DRY-RUN] Would install to: $install_dir"
         log_info "[DRY-RUN] Version: $version"
-        [[ "$optimize" == "true" ]] && log_info "[DRY-RUN] Would run optimization with modules: $modules"
+        [[ "$run_setup_flag" == "true" ]] && log_info "[DRY-RUN] Would run full setup"
         exit 0
     fi
 
     install_nldevicessetup "$version" "$install_dir"
 
-    if [[ "$optimize" == "true" ]]; then
-        run_optimization "$install_dir" "$modules" "$dry_run"
+    if [[ "$run_setup_flag" == "true" ]]; then
+        run_setup "$install_dir"
     else
         log_info ""
-        log_info "To run optimization:"
-        log_info "  sudo $install_dir/scripts/linux/optimize.sh"
-        log_info ""
-        log_info "Or simply:"
+        log_info "To run full production setup:"
         log_info "  sudo nldevicessetup"
+        log_info ""
+        log_info "Or directly:"
+        log_info "  sudo $install_dir/scripts/linux/setup.sh"
     fi
 }
 

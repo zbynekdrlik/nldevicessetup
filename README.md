@@ -15,15 +15,15 @@ Cross-platform device configuration and optimization toolkit for low-latency aud
 
 ### Linux
 
+One-line install and setup:
 ```bash
-curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | sudo bash -s -- --setup
 ```
 
-Then run optimization:
+Or install first, run setup later:
 ```bash
+curl -sSL https://raw.githubusercontent.com/zbynekdrlik/nldevicessetup/main/scripts/bootstrap/install.sh | sudo bash
 sudo nldevicessetup
-# or
-sudo /opt/nldevicessetup/scripts/linux/optimize.sh
 ```
 
 ### Windows (PowerShell as Administrator)

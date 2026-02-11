@@ -91,6 +91,23 @@ function Test-CommandExists {
     $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
 }
 
+function Read-UserConfirmation {
+    param(
+        [string]$Prompt,
+        [bool]$Default = $false
+    )
+    $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
+    try {
+        if ([Environment]::UserInteractive -and [Console]::KeyAvailable -ne $null) {
+            $response = Read-Host "$Prompt $hint"
+            if ([string]::IsNullOrWhiteSpace($response)) { return $Default }
+            return $response.Trim().ToUpper().StartsWith('Y')
+        }
+    }
+    catch {}
+    return $Default
+}
+
 function Test-WingetPackageInstalled {
     param([string]$PackageId)
     try {
@@ -282,58 +299,256 @@ function Install-WingetPackage {
 function Install-OpenSSH {
     Write-LogInfo "Checking OpenSSH..."
 
+    $restartNeeded = $false
+    $needsInstall = $false
+
+    # Query current capability state
     $sshClient = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Client*'
     $sshServer = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
 
-    $needsInstall = $false
-
+    # Install OpenSSH Client
     if ($sshClient.State -ne 'Installed') {
         Write-LogInfo "Installing OpenSSH Client..."
         try {
-            Add-WindowsCapability -Online -Name $sshClient.Name
+            $result = Add-WindowsCapability -Online -Name $sshClient.Name -ErrorAction Stop
+            if ($result.RestartNeeded) { $restartNeeded = $true }
             $needsInstall = $true
+
+            # Verify installation
+            $verify = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Client*'
+            if ($verify.State -eq 'Installed') {
+                Write-LogSuccess "OpenSSH Client installed"
+            }
+            else {
+                Write-LogError "OpenSSH Client installation reported success but capability state is: $($verify.State)"
+                $script:Results.Failed += 'OpenSSH Client'
+                return $false
+            }
         }
         catch {
-            Write-LogWarn "Failed to install OpenSSH Client: $_"
+            Write-LogError "Failed to install OpenSSH Client: $_"
+            $script:Results.Failed += 'OpenSSH Client'
+            return $false
         }
     }
+    else {
+        Write-LogSuccess "OpenSSH Client already installed"
+    }
 
+    # Install OpenSSH Server
     if ($sshServer.State -ne 'Installed') {
         Write-LogInfo "Installing OpenSSH Server..."
         try {
-            Add-WindowsCapability -Online -Name $sshServer.Name
+            $result = Add-WindowsCapability -Online -Name $sshServer.Name -ErrorAction Stop
+            if ($result.RestartNeeded) { $restartNeeded = $true }
             $needsInstall = $true
+
+            # Verify installation
+            $verify = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+            if ($verify.State -eq 'Installed') {
+                Write-LogSuccess "OpenSSH Server installed"
+            }
+            else {
+                Write-LogError "OpenSSH Server installation reported success but capability state is: $($verify.State)"
+                $script:Results.Failed += 'OpenSSH Server'
+                return $false
+            }
         }
         catch {
-            Write-LogWarn "Failed to install OpenSSH Server: $_"
+            Write-LogError "Failed to install OpenSSH Server: $_"
+            $script:Results.Failed += 'OpenSSH Server'
+            return $false
         }
     }
+    else {
+        Write-LogSuccess "OpenSSH Server already installed"
+    }
 
-    # Configure SSH Server
+    # Configure and start sshd service
+    Write-LogInfo "Configuring sshd service..."
     try {
-        Start-Service sshd -ErrorAction SilentlyContinue
-        Set-Service -Name sshd -StartupType 'Automatic' -ErrorAction SilentlyContinue
+        Set-Service -Name sshd -StartupType 'Automatic' -ErrorAction Stop
+        Start-Service sshd -ErrorAction Stop
 
-        # Firewall rule
+        # Verify sshd is actually running
+        $sshdService = Get-Service -Name sshd -ErrorAction Stop
+        if ($sshdService.Status -ne 'Running') {
+            Write-LogError "sshd service is not running (status: $($sshdService.Status))"
+            $script:Results.Failed += 'OpenSSH (sshd start)'
+            return $false
+        }
+        Write-LogSuccess "sshd service running and set to automatic"
+    }
+    catch {
+        Write-LogError "Failed to configure/start sshd service: $_"
+        $script:Results.Failed += 'OpenSSH (sshd config)'
+        return $false
+    }
+
+    # Firewall rule
+    try {
         $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
         if (-not $rule) {
-            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction Stop
+            Write-LogSuccess "Firewall rule created for SSH (port 22)"
         }
     }
     catch {
-        Write-LogWarn "Failed to configure SSH Server: $_"
+        Write-LogWarn "Failed to create firewall rule for SSH: $_"
+    }
+
+    if ($restartNeeded) {
+        Write-LogWarn "OpenSSH installation requires a reboot to fully complete"
     }
 
     if ($needsInstall) {
-        Write-LogSuccess "OpenSSH installed and configured"
         $script:Results.Installed += 'OpenSSH'
     }
     else {
-        Write-LogSuccess "OpenSSH already installed"
         $script:Results.AlreadyInstalled += 'OpenSSH'
     }
 
     return $true
+}
+
+function New-SSHRemoteUser {
+    $username = 'newlevel'
+    $password = 'newlevel'
+    $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+
+    Write-LogInfo "Configuring dedicated SSH remote access user '$username'..."
+
+    # Check if user already exists
+    $existingUser = $null
+    try {
+        $existingUser = Get-LocalUser -Name $username -ErrorAction Stop
+    }
+    catch {}
+
+    if ($existingUser) {
+        Write-LogInfo "User '$username' already exists - ensuring correct configuration"
+
+        # Reset password to ensure consistency
+        try {
+            Set-LocalUser -Name $username -Password $securePassword -PasswordNeverExpires $true -UserMayNotChangePassword $true -ErrorAction Stop
+            Write-LogSuccess "Password reset for '$username'"
+        }
+        catch {
+            Write-LogWarn "Set-LocalUser failed, trying net user fallback: $_"
+            try {
+                $null = net user $username $password /passwordchg:no /expires:never 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "net user exited with code $LASTEXITCODE" }
+                Write-LogSuccess "Password reset for '$username' (via net user)"
+            }
+            catch {
+                Write-LogError "Failed to reset password for '$username': $_"
+                $script:Results.Failed += 'SSH User (password reset)'
+                return $false
+            }
+        }
+
+        # Enable user if disabled
+        if (-not $existingUser.Enabled) {
+            try {
+                Enable-LocalUser -Name $username -ErrorAction Stop
+                Write-LogSuccess "User '$username' enabled"
+            }
+            catch {
+                Write-LogWarn "Enable-LocalUser failed, trying net user fallback: $_"
+                try {
+                    $null = net user $username /active:yes 2>&1
+                    if ($LASTEXITCODE -ne 0) { throw "net user exited with code $LASTEXITCODE" }
+                    Write-LogSuccess "User '$username' enabled (via net user)"
+                }
+                catch {
+                    Write-LogError "Failed to enable user '$username': $_"
+                    $script:Results.Failed += 'SSH User (enable)'
+                    return $false
+                }
+            }
+        }
+    }
+    else {
+        # Create new user
+        Write-LogInfo "Creating local user '$username'..."
+        try {
+            New-LocalUser -Name $username -Password $securePassword -PasswordNeverExpires -UserMayNotChangePassword -FullName 'NL Remote Access' -Description 'Dedicated SSH remote access account' -ErrorAction Stop
+            Write-LogSuccess "User '$username' created"
+        }
+        catch {
+            Write-LogWarn "New-LocalUser failed, trying net user fallback: $_"
+            try {
+                $null = net user $username $password /add /fullname:"NL Remote Access" /comment:"Dedicated SSH remote access account" /passwordchg:no /expires:never 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "net user exited with code $LASTEXITCODE" }
+                Write-LogSuccess "User '$username' created (via net user)"
+            }
+            catch {
+                Write-LogError "Failed to create user '$username': $_"
+                $script:Results.Failed += 'SSH User (create)'
+                return $false
+            }
+        }
+    }
+
+    # Add to Administrators group (resolve by SID for non-English Windows)
+    $adminGroupSID = 'S-1-5-32-544'
+    try {
+        $adminGroup = (Get-LocalGroup | Where-Object { $_.SID.Value -eq $adminGroupSID }).Name
+    }
+    catch {
+        $adminGroup = 'Administrators'
+    }
+
+    Write-LogInfo "Adding '$username' to '$adminGroup' group..."
+    $isMember = $false
+    try {
+        $members = Get-LocalGroupMember -Group $adminGroup -ErrorAction Stop
+        $isMember = $members | Where-Object { $_.Name -match "\\$username$" }
+    }
+    catch {}
+
+    if ($isMember) {
+        Write-LogSuccess "User '$username' is already a member of '$adminGroup'"
+    }
+    else {
+        try {
+            Add-LocalGroupMember -Group $adminGroup -Member $username -ErrorAction Stop
+            Write-LogSuccess "User '$username' added to '$adminGroup'"
+        }
+        catch {
+            Write-LogWarn "Add-LocalGroupMember failed, trying net localgroup fallback: $_"
+            try {
+                $null = net localgroup $adminGroup $username /add 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "net localgroup exited with code $LASTEXITCODE" }
+                Write-LogSuccess "User '$username' added to '$adminGroup' (via net localgroup)"
+            }
+            catch {
+                Write-LogError "Failed to add '$username' to '$adminGroup': $_"
+                $script:Results.Failed += 'SSH User (admin group)'
+                return $false
+            }
+        }
+    }
+
+    # Final verification
+    try {
+        $verifyUser = Get-LocalUser -Name $username -ErrorAction Stop
+        if ($verifyUser.Enabled) {
+            Write-LogSuccess "SSH remote access user '$username' is ready"
+            $script:Results.Installed += "SSH User '$username'"
+            return $true
+        }
+        else {
+            Write-LogError "User '$username' exists but is not enabled"
+            $script:Results.Failed += 'SSH User (verification)'
+            return $false
+        }
+    }
+    catch {
+        Write-LogError "Failed to verify user '$username': $_"
+        $script:Results.Failed += 'SSH User (verification)'
+        return $false
+    }
 }
 
 function Install-NpmPackage {
@@ -1231,6 +1446,9 @@ function Main {
 
     Show-Banner
 
+    # Prompt for dedicated SSH user before starting
+    $createSSHUser = Read-UserConfirmation -Prompt "Create dedicated 'newlevel' user for SSH remote access?"
+
     Write-LogInfo "Starting setup on $env:COMPUTERNAME"
     Write-LogInfo "Windows Version: $([System.Environment]::OSVersion.Version)"
     Write-Host ""
@@ -1240,6 +1458,14 @@ function Main {
 
     # 0. Install SSH FIRST (enables remote debugging if script fails)
     $null = Install-OpenSSH
+
+    # Create dedicated SSH user if approved
+    if ($createSSHUser) {
+        $null = New-SSHRemoteUser
+    }
+    else {
+        Write-LogInfo "Skipping dedicated SSH user creation (declined by user)"
+    }
 
     # 1. Ensure Microsoft Store is available (required for winget)
     $null = Ensure-MicrosoftStore

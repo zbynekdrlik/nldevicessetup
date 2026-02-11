@@ -357,10 +357,10 @@ HandleLidSwitchDocked=ignore
 IdleAction=ignore
 EOF
 
-    # Restart logind to apply
-    systemctl restart systemd-logind 2>/dev/null || true
+    # NOTE: Do NOT restart systemd-logind here - it kills the active desktop session.
+    # The logind config takes effect on next login or reboot.
 
-    log_success "Power buttons configured to do nothing"
+    log_success "Power buttons configured to do nothing (takes effect on next login/reboot)"
     log_info "  - Power key: ignore"
     log_info "  - Suspend key: ignore"
     log_info "  - Lid switch: ignore"
@@ -559,6 +559,87 @@ EOF
 }
 #endregion
 
+#region Install Essential Software
+install_essential_software() {
+    log_info "Installing essential software packages..."
+
+    # Update package lists
+    apt-get update -qq 2>/dev/null || true
+
+    # Core system tools
+    local packages=(
+        openssh-server          # SSH remote access
+        git                     # Version control
+        curl                    # HTTP client
+        wget                    # HTTP client
+        ethtool                 # NIC configuration
+        net-tools               # ifconfig, netstat
+        iptables                # Firewall/QoS
+        build-essential         # Compiler toolchain
+        htop                    # System monitor
+        tmux                    # Terminal multiplexer
+    )
+
+    # Install packages (skip already installed)
+    for pkg in "${packages[@]}"; do
+        if ! dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
+            log_info "  Installing $pkg..."
+            apt-get install -y -qq "$pkg" 2>/dev/null || log_warn "  Could not install $pkg"
+        else
+            log_info "  $pkg already installed"
+        fi
+    done
+
+    # Enable and start SSH
+    if systemctl is-enabled ssh &>/dev/null || systemctl is-enabled sshd &>/dev/null; then
+        log_info "  SSH already enabled"
+    else
+        systemctl enable --now ssh 2>/dev/null || systemctl enable --now sshd 2>/dev/null || true
+    fi
+    log_success "SSH server enabled"
+
+    # Install GitHub CLI if not present
+    if ! command_exists gh; then
+        log_info "  Installing GitHub CLI..."
+        (type -p wget >/dev/null || apt-get install wget -y -qq) \
+            && mkdir -p -m 755 /etc/apt/keyrings \
+            && out=$(mktemp) \
+            && wget -qO "$out" https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            && cat "$out" | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+            && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+            && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+            && apt-get update -qq \
+            && apt-get install gh -y -qq 2>/dev/null \
+            && rm -f "$out" \
+            || log_warn "  Could not install GitHub CLI"
+    fi
+    if command_exists gh; then
+        log_success "GitHub CLI installed"
+    fi
+
+    # Install Claude Code CLI if not present
+    if ! command_exists claude; then
+        log_info "  Installing Claude Code CLI..."
+        # Claude Code requires npm/node
+        if ! command_exists npm; then
+            log_info "  Installing Node.js first..."
+            curl -fsSL https://deb.nodesource.com/setup_lts.x 2>/dev/null | bash - 2>/dev/null || true
+            apt-get install -y -qq nodejs 2>/dev/null || true
+        fi
+        if command_exists npm; then
+            npm install -g @anthropic-ai/claude-code 2>/dev/null || log_warn "  Could not install Claude Code CLI"
+        else
+            log_warn "  npm not available - skipping Claude Code CLI"
+        fi
+    fi
+    if command_exists claude; then
+        log_success "Claude Code CLI installed"
+    fi
+
+    log_success "Essential software installation complete"
+}
+#endregion
+
 #region Disable Unnecessary Services
 disable_unnecessary_services() {
     log_info "Checking unnecessary services..."
@@ -578,6 +659,43 @@ disable_unnecessary_services() {
             log_success "  $svc disabled"
         fi
     done
+}
+#endregion
+
+#region Configure Passwordless Sudo
+configure_passwordless_sudo() {
+    local target_user="${1:-}"
+
+    # Detect user same way as auto-login
+    if [[ -z "$target_user" ]]; then
+        target_user="${SUDO_USER:-}"
+    fi
+    if [[ -z "$target_user" ]]; then
+        target_user=$(logname 2>/dev/null || true)
+    fi
+    if [[ -z "$target_user" ]] || [[ "$target_user" == "root" ]]; then
+        target_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}')
+    fi
+
+    if [[ -z "$target_user" ]]; then
+        log_warn "Could not determine user for passwordless sudo - skipping"
+        return 1
+    fi
+
+    log_info "Configuring passwordless sudo for user: $target_user"
+
+    local sudoers_file="/etc/sudoers.d/99-nldevicessetup-${target_user}"
+    echo "$target_user ALL=(ALL) NOPASSWD: ALL" > "$sudoers_file"
+    chmod 440 "$sudoers_file"
+
+    # Validate sudoers syntax
+    if visudo -cf "$sudoers_file" &>/dev/null; then
+        log_success "Passwordless sudo configured for $target_user"
+    else
+        log_error "Invalid sudoers syntax - removing file"
+        rm -f "$sudoers_file"
+        return 1
+    fi
 }
 #endregion
 
@@ -768,6 +886,8 @@ show_summary() {
 
     echo ""
     log_success "Optimizations Applied:"
+    echo "  - Essential software: SSH, git, gh, claude, ethtool, etc."
+    echo "  - Passwordless sudo: configured"
     echo "  - CPU governor: performance"
     echo "  - USB/PCI power management: disabled"
     echo "  - Power buttons/lid: do nothing"
@@ -813,6 +933,13 @@ main() {
     # Show banner
     show_banner
     show_system_info
+
+    # Install essential software first
+    log_section "ESSENTIAL SOFTWARE"
+    install_essential_software
+
+    log_section "PASSWORDLESS SUDO"
+    configure_passwordless_sudo
 
     # Apply optimizations
     log_section "POWER MANAGEMENT"

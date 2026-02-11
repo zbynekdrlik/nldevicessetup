@@ -98,7 +98,7 @@ function Read-UserConfirmation {
     )
     $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
     try {
-        if ([Environment]::UserInteractive -and [Console]::KeyAvailable -ne $null) {
+        if ([Environment]::UserInteractive -and $null -ne [Console]::KeyAvailable) {
             $response = Read-Host "$Prompt $hint"
             if ([string]::IsNullOrWhiteSpace($response)) { return $Default }
             return $response.Trim().ToUpper().StartsWith('Y')

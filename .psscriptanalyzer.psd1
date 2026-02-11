@@ -33,7 +33,10 @@
         'PSUseBOMForUnicodeEncodedFile',
 
         # Variables may be assigned for future use or in conditionally-executed code
-        'PSUseDeclaredVarsMoreThanAssignments'
+        'PSUseDeclaredVarsMoreThanAssignments',
+
+        # Plaintext passwords are intentional in setup scripts (known default credentials)
+        'PSAvoidUsingConvertToSecureStringWithPlainText'
     )
 
     Rules = @{

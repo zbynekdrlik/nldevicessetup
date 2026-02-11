@@ -429,6 +429,7 @@ EOF
 #endregion
 
 #region Configure Auto Login
+# shellcheck disable=SC2120
 configure_auto_login() {
     local target_user="${1:-}"
 
@@ -602,7 +603,8 @@ install_essential_software() {
     if ! command_exists gh; then
         log_info "  Installing GitHub CLI..."
         (type -p wget >/dev/null || apt-get install wget -y -qq) \
-            && mkdir -p -m 755 /etc/apt/keyrings \
+            && mkdir -p /etc/apt/keyrings \
+            && chmod 755 /etc/apt/keyrings \
             && out=$(mktemp) \
             && wget -qO "$out" https://cli.github.com/packages/githubcli-archive-keyring.gpg \
             && cat "$out" | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
@@ -663,6 +665,7 @@ disable_unnecessary_services() {
 #endregion
 
 #region Configure Passwordless Sudo
+# shellcheck disable=SC2120
 configure_passwordless_sudo() {
     local target_user="${1:-}"
 

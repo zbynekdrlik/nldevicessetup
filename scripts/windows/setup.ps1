@@ -426,25 +426,19 @@ function New-SSHRemoteUser {
     catch {}
 
     if ($existingUser) {
-        Write-LogInfo "User '$username' already exists - ensuring correct configuration"
+        Write-LogInfo "User '$username' already exists - verifying configuration"
 
-        # Reset password to ensure consistency
+        # DO NOT reset password for existing users!
+        # This would break existing SSH keys, saved credentials, etc.
+        Write-LogInfo "Keeping existing password for '$username' (not modified)"
+
+        # Only ensure password policies are set correctly (without changing password)
         try {
-            Set-LocalUser -Name $username -Password $securePassword -PasswordNeverExpires $true -UserMayNotChangePassword $true -ErrorAction Stop
-            Write-LogSuccess "Password reset for '$username'"
+            Set-LocalUser -Name $username -PasswordNeverExpires $true -UserMayNotChangePassword $false -ErrorAction Stop
+            Write-LogSuccess "Password policies updated for '$username'"
         }
         catch {
-            Write-LogWarn "Set-LocalUser failed, trying net user fallback: $_"
-            try {
-                $null = net user $username $password /passwordchg:no /expires:never 2>&1
-                if ($LASTEXITCODE -ne 0) { throw "net user exited with code $LASTEXITCODE" }
-                Write-LogSuccess "Password reset for '$username' (via net user)"
-            }
-            catch {
-                Write-LogError "Failed to reset password for '$username': $_"
-                $script:Results.Failed += 'SSH User (password reset)'
-                return $false
-            }
+            Write-LogWarn "Could not update password policies: $_"
         }
 
         # Enable user if disabled
@@ -466,6 +460,9 @@ function New-SSHRemoteUser {
                     return $false
                 }
             }
+        }
+        else {
+            Write-LogSuccess "User '$username' is already enabled"
         }
     }
     else {
@@ -591,14 +588,45 @@ function Install-NpmPackage {
 
 function Install-DanteTimeSync {
     Write-LogInfo "Installing DanteTimeSync..."
-    try {
-        Invoke-Expression (Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.ps1')
-        Write-LogSuccess "DanteTimeSync installed"
-        $script:Results.Installed += 'DanteTimeSync'
+
+    # Check if already installed (scheduled task exists)
+    $existingTask = Get-ScheduledTask -TaskName 'DanteTimeSync' -ErrorAction SilentlyContinue
+    if ($existingTask) {
+        Write-LogSuccess "DanteTimeSync already installed (scheduled task exists)"
+        $script:Results.AlreadyInstalled += 'DanteTimeSync'
         return $true
     }
+
+    try {
+        # Run the installer
+        $ErrorActionPreference = 'Continue'
+        Invoke-Expression (Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.ps1')
+
+        # Verify installation succeeded by checking for scheduled task
+        Start-Sleep -Seconds 2
+        $task = Get-ScheduledTask -TaskName 'DanteTimeSync' -ErrorAction SilentlyContinue
+
+        if ($task) {
+            Write-LogSuccess "DanteTimeSync installed successfully (verified)"
+            $script:Results.Installed += 'DanteTimeSync'
+            return $true
+        }
+        else {
+            Write-LogWarn "DanteTimeSync installer ran but scheduled task not found"
+            $script:Results.Failed += 'DanteTimeSync (verification failed)'
+            return $false
+        }
+    }
     catch {
-        Write-LogWarn "DanteTimeSync installation issue: $_"
+        # Even if there's an error, check if it actually installed
+        $task = Get-ScheduledTask -TaskName 'DanteTimeSync' -ErrorAction SilentlyContinue
+        if ($task) {
+            Write-LogSuccess "DanteTimeSync installed successfully (despite errors)"
+            $script:Results.Installed += 'DanteTimeSync'
+            return $true
+        }
+
+        Write-LogError "DanteTimeSync installation failed: $_"
         $script:Results.Failed += 'DanteTimeSync'
         return $false
     }
@@ -1218,14 +1246,22 @@ function Set-AutoLogin {
     Write-LogInfo "Configuring auto-login for current user..."
 
     $username = $env:USERNAME
-    $password = 'newlevel'
 
-    # Set auto-login via registry
+    # IMPORTANT: We do NOT change the user's password here!
+    # Auto-login will use the user's existing password.
+    # If the user doesn't have a password or wants to set one, they must do it manually.
+
+    Write-LogWarn "NOTE: Auto-login requires your account to have a password set."
+    Write-LogWarn "This script will NOT change your existing password."
+    Write-LogWarn "If you don't have a password, please set one manually first."
+
+    # Set auto-login via registry (without storing password)
+    # Note: For auto-login to work, you need to manually set DefaultPassword in registry
+    # or use Windows Settings > Accounts > Sign-in options
     $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 
     Set-RegistryValue -Path $winlogonPath -Name 'AutoAdminLogon' -Value '1' -Type 'String'
     Set-RegistryValue -Path $winlogonPath -Name 'DefaultUserName' -Value $username -Type 'String'
-    Set-RegistryValue -Path $winlogonPath -Name 'DefaultPassword' -Value $password -Type 'String'
     Set-RegistryValue -Path $winlogonPath -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -Type 'String'
 
     # Remove any auto-logon count limit
@@ -1233,26 +1269,12 @@ function Set-AutoLogin {
         Remove-ItemProperty -Path $winlogonPath -Name 'AutoLogonCount' -ErrorAction SilentlyContinue
     } catch {}
 
-    # Set the user password
-    try {
-        $user = [ADSI]"WinNT://./$username,user"
-        $user.SetPassword($password)
-        $user.SetInfo()
-        Write-LogSuccess "Password set for $username"
-    }
-    catch {
-        # Try net user as fallback
-        try {
-            $null = net user $username $password 2>$null
-            Write-LogSuccess "Password set for $username (via net user)"
-        }
-        catch {
-            Write-LogWarn "Could not set password for $username : $_"
-        }
-    }
-
-    Write-LogSuccess "Auto-login configured for $username"
-    $script:Results.Optimizations += "Auto-login: Enabled for $username"
+    Write-LogSuccess "Auto-login configured for $username (using existing password)"
+    Write-LogWarn "To complete auto-login setup, you must:"
+    Write-LogWarn "  1. Ensure your account has a password"
+    Write-LogWarn "  2. Manually add registry value: DefaultPassword at $winlogonPath"
+    Write-LogWarn "  OR use: netplwiz (uncheck 'Users must enter a username and password')"
+    $script:Results.Optimizations += "Auto-login: Registry configured (password not changed)"
 }
 
 function Set-UACNeverNotify {

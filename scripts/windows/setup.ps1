@@ -614,6 +614,16 @@ function Install-NpmPackage {
 function Install-DanteTimeSync {
     Write-LogInfo "Installing DanteTimeSync..."
 
+    # Install Visual C++ Runtime (required dependency)
+    if (Test-CommandExists 'winget') {
+        Write-LogInfo "Ensuring Visual C++ Runtime is installed..."
+        $vcResult = winget list --id Microsoft.VCRedist.2015+.x64 2>$null
+        if ($vcResult -notmatch 'Microsoft.VCRedist') {
+            winget install Microsoft.VCRedist.2015+.x64 --accept-package-agreements --accept-source-agreements --silent 2>$null | Out-Null
+            Write-LogSuccess "Visual C++ Runtime installed"
+        }
+    }
+
     # First, check if there's a problematic DanteSync service and remove it
     $danteService = Get-Service -Name 'DanteSync' -ErrorAction SilentlyContinue
     if ($danteService) {

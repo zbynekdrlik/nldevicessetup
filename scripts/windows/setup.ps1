@@ -416,6 +416,31 @@ function New-SSHRemoteUser {
     $password = 'newlevel'
     $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
 
+    # Check if we're already running as 'newlevel' user
+    if ($env:USERNAME -eq 'newlevel') {
+        Write-LogInfo "Already running as '$username' - skipping user creation"
+        Write-LogInfo "Ensuring '$username' is properly configured..."
+
+        # Just ensure password and policies are correct
+        try {
+            Set-LocalUser -Name $username -Password $securePassword -PasswordNeverExpires $true -ErrorAction Stop
+            Write-LogSuccess "Password set and policies configured for '$username'"
+        }
+        catch {
+            Write-LogWarn "Could not set password via Set-LocalUser: $_"
+            try {
+                $null = net user $username $password 2>&1
+                Write-LogSuccess "Password set via net user for '$username'"
+            }
+            catch {
+                Write-LogWarn "Could not set password: $_"
+            }
+        }
+
+        $script:Results.AlreadyInstalled += "SSH User '$username' (current user)"
+        return $true
+    }
+
     Write-LogInfo "Configuring dedicated SSH remote access user '$username'..."
 
     # Check if user already exists
@@ -589,6 +614,34 @@ function Install-NpmPackage {
 function Install-DanteTimeSync {
     Write-LogInfo "Installing DanteTimeSync..."
 
+    # First, check if there's a problematic DanteSync service and remove it
+    $danteService = Get-Service -Name 'DanteSync' -ErrorAction SilentlyContinue
+    if ($danteService) {
+        Write-LogInfo "Found existing DanteSync service, stopping and removing..."
+        try {
+            Stop-Service -Name 'DanteSync' -Force -ErrorAction SilentlyContinue
+            sc.exe delete DanteSync 2>$null | Out-Null
+            Write-LogSuccess "Removed old DanteSync service"
+        }
+        catch {
+            Write-LogWarn "Could not remove DanteSync service: $_"
+        }
+    }
+
+    # Also check for common variations
+    $serviceVariations = @('DanteSinc', 'dantesinc', 'DanteTimeSync')
+    foreach ($svcName in $serviceVariations) {
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if ($svc) {
+            try {
+                Stop-Service -Name $svcName -Force -ErrorAction SilentlyContinue
+                sc.exe delete $svcName 2>$null | Out-Null
+                Write-LogInfo "Removed old service: $svcName"
+            }
+            catch {}
+        }
+    }
+
     # Check if already installed (scheduled task exists)
     $existingTask = Get-ScheduledTask -TaskName 'DanteTimeSync' -ErrorAction SilentlyContinue
     if ($existingTask) {
@@ -728,6 +781,17 @@ function Optimize-DarkMode {
 
     Write-LogSuccess "Dark mode enabled"
     $script:Results.Optimizations += 'Dark mode: Enabled'
+}
+
+function Set-TaskbarAlignmentLeft {
+    Write-LogInfo "Setting taskbar alignment to left..."
+
+    # Windows 11 taskbar alignment: 0 = Left, 1 = Center (default)
+    $advancedPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+    Set-RegistryValue -Path $advancedPath -Name 'TaskbarAl' -Value 0
+
+    Write-LogSuccess "Taskbar alignment set to left"
+    $script:Results.Optimizations += 'Taskbar: Left alignment'
 }
 
 function Optimize-DisableTransparency {
@@ -1167,7 +1231,47 @@ function Optimize-DisableStartupItems {
     }
     $disabledItems += 'Logitech Download Assistant'
 
-    # 4. Disable other common bloatware startup items
+    # 4. Disable Brave browser startup
+    $bravePaths = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+    )
+
+    foreach ($path in $bravePaths) {
+        try {
+            $items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            $items.PSObject.Properties | Where-Object { $_.Name -like '*Brave*' } | ForEach-Object {
+                Remove-ItemProperty -Path $path -Name $_.Name -ErrorAction SilentlyContinue
+                Write-LogInfo "  Removed: $($_.Name) from $path"
+                $disabledItems += "Brave ($($_.Name))"
+            }
+        } catch {}
+    }
+
+    # Disable Brave scheduled tasks
+    $braveTasks = Get-ScheduledTask -TaskName '*Brave*' -ErrorAction SilentlyContinue
+    foreach ($task in $braveTasks) {
+        try {
+            Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
+        } catch {}
+    }
+    $disabledItems += 'Brave Browser'
+
+    # 5. Disable Windows Terminal startup
+    foreach ($path in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run')) {
+        try {
+            $items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            $items.PSObject.Properties | Where-Object { $_.Name -like '*Terminal*' -or $_.Name -like '*WindowsTerminal*' } | ForEach-Object {
+                Remove-ItemProperty -Path $path -Name $_.Name -ErrorAction SilentlyContinue
+                Write-LogInfo "  Removed: $($_.Name) from $path"
+                $disabledItems += "Terminal ($($_.Name))"
+            }
+        } catch {}
+    }
+    $disabledItems += 'Windows Terminal'
+
+    # 6. Disable other common bloatware startup items
     $bloatwareItems = @(
         'OneDrive',
         'OneDriveSetup',
@@ -1189,8 +1293,8 @@ function Optimize-DisableStartupItems {
         }
     }
 
-    Write-LogSuccess "Startup items disabled: Edge, SecurityHealth, LogiLDA"
-    $script:Results.Optimizations += 'Startup: Edge, SecurityHealth, LogiLDA disabled'
+    Write-LogSuccess "Startup items disabled: Edge, SecurityHealth, Brave, Terminal, LogiLDA"
+    $script:Results.Optimizations += 'Startup: Edge, SecurityHealth, Brave, Terminal, LogiLDA disabled'
 }
 
 function Optimize-DisableFirewallAndRansomware {
@@ -1246,35 +1350,42 @@ function Set-AutoLogin {
     Write-LogInfo "Configuring auto-login for current user..."
 
     $username = $env:USERNAME
-
-    # IMPORTANT: We do NOT change the user's password here!
-    # Auto-login will use the user's existing password.
-    # If the user doesn't have a password or wants to set one, they must do it manually.
-
-    Write-LogWarn "NOTE: Auto-login requires your account to have a password set."
-    Write-LogWarn "This script will NOT change your existing password."
-    Write-LogWarn "If you don't have a password, please set one manually first."
-
-    # Set auto-login via registry (without storing password)
-    # Note: For auto-login to work, you need to manually set DefaultPassword in registry
-    # or use Windows Settings > Accounts > Sign-in options
     $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 
-    Set-RegistryValue -Path $winlogonPath -Name 'AutoAdminLogon' -Value '1' -Type 'String'
-    Set-RegistryValue -Path $winlogonPath -Name 'DefaultUserName' -Value $username -Type 'String'
-    Set-RegistryValue -Path $winlogonPath -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -Type 'String'
+    # Check if the current user is 'newlevel' - if so, we know the password
+    if ($username -eq 'newlevel') {
+        Write-LogInfo "Detected 'newlevel' user - configuring full auto-login"
 
-    # Remove any auto-logon count limit
-    try {
-        Remove-ItemProperty -Path $winlogonPath -Name 'AutoLogonCount' -ErrorAction SilentlyContinue
-    } catch {}
+        Set-RegistryValue -Path $winlogonPath -Name 'AutoAdminLogon' -Value '1' -Type 'String'
+        Set-RegistryValue -Path $winlogonPath -Name 'DefaultUserName' -Value $username -Type 'String'
+        Set-RegistryValue -Path $winlogonPath -Name 'DefaultPassword' -Value 'newlevel' -Type 'String'
+        Set-RegistryValue -Path $winlogonPath -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -Type 'String'
 
-    Write-LogSuccess "Auto-login configured for $username (using existing password)"
-    Write-LogWarn "To complete auto-login setup, you must:"
-    Write-LogWarn "  1. Ensure your account has a password"
-    Write-LogWarn "  2. Manually add registry value: DefaultPassword at $winlogonPath"
-    Write-LogWarn "  OR use: netplwiz (uncheck 'Users must enter a username and password')"
-    $script:Results.Optimizations += "Auto-login: Registry configured (password not changed)"
+        # Remove any auto-logon count limit
+        try {
+            Remove-ItemProperty -Path $winlogonPath -Name 'AutoLogonCount' -ErrorAction SilentlyContinue
+        } catch {}
+
+        Write-LogSuccess "Auto-login fully configured for $username (no password prompt at startup)"
+        $script:Results.Optimizations += "Auto-login: Fully configured for newlevel"
+    }
+    else {
+        # For other users, configure auto-login but don't set password
+        Write-LogWarn "NOTE: Auto-login requires your account to have a password set."
+
+        Set-RegistryValue -Path $winlogonPath -Name 'AutoAdminLogon' -Value '1' -Type 'String'
+        Set-RegistryValue -Path $winlogonPath -Name 'DefaultUserName' -Value $username -Type 'String'
+        Set-RegistryValue -Path $winlogonPath -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -Type 'String'
+
+        # Remove any auto-logon count limit
+        try {
+            Remove-ItemProperty -Path $winlogonPath -Name 'AutoLogonCount' -ErrorAction SilentlyContinue
+        } catch {}
+
+        Write-LogSuccess "Auto-login configured for $username"
+        Write-LogWarn "To complete auto-login, manually set DefaultPassword in registry or use netplwiz"
+        $script:Results.Optimizations += "Auto-login: Registry configured (password not set)"
+    }
 }
 
 function Set-UACNeverNotify {
@@ -1468,8 +1579,15 @@ function Main {
 
     Show-Banner
 
-    # Prompt for dedicated SSH user before starting
-    $createSSHUser = Read-UserConfirmation -Prompt "Create dedicated 'newlevel' user for SSH remote access?"
+    # Prompt for dedicated SSH user before starting (skip if already running as newlevel)
+    $createSSHUser = $false
+    if ($env:USERNAME -eq 'newlevel') {
+        Write-LogInfo "Running as 'newlevel' user - will configure SSH access automatically"
+        $createSSHUser = $true
+    }
+    else {
+        $createSSHUser = Read-UserConfirmation -Prompt "Create dedicated 'newlevel' user for SSH remote access?"
+    }
 
     Write-LogInfo "Starting setup on $env:COMPUTERNAME"
     Write-LogInfo "Windows Version: $([System.Environment]::OSVersion.Version)"
@@ -1536,6 +1654,7 @@ function Main {
     # Visual (safe)
     Optimize-VisualEffects
     Optimize-DarkMode
+    Set-TaskbarAlignmentLeft
     Optimize-DisableTransparency
     Optimize-DisableSounds
 

@@ -1,0 +1,100 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: base-software
+  description: Install base software for all workstations
+  tags:
+    - software
+    - essentials
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  actions:
+    - name: Install Windows Terminal
+      windows:
+        module: winget
+        params:
+          package: Microsoft.WindowsTerminal
+
+    - name: Install Node.js
+      windows:
+        module: winget
+        params:
+          package: OpenJS.NodeJS
+      linux:
+        module: command
+        params:
+          command: |
+            if ! command -v node &>/dev/null; then
+              curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+              apt-get install -y nodejs
+            fi
+
+    - name: Install Claude Code CLI
+      windows:
+        module: npm
+        params:
+          package: "@anthropic-ai/claude-code"
+          global: true
+      linux:
+        module: npm
+        params:
+          package: "@anthropic-ai/claude-code"
+          global: true
+
+    - name: Install GitHub CLI
+      linux:
+        module: command
+        params:
+          command: |
+            if ! command -v gh &>/dev/null; then
+              type -p wget >/dev/null || apt-get install wget -y
+              mkdir -p /etc/apt/keyrings
+              chmod 755 /etc/apt/keyrings
+              wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+              chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+              apt-get update
+              apt-get install gh -y
+            fi
+
+    - name: Install Essential Tools (Linux)
+      linux:
+        module: apt
+        params:
+          packages:
+            - git
+            - curl
+            - wget
+            - ethtool
+            - net-tools
+            - iptables
+            - build-essential
+            - htop
+            - tmux
+
+    - name: Disable Unnecessary Services
+      windows:
+        module: command
+        params:
+          command: |
+            $services = @('SysMain', 'DiagTrack', 'dmwappushservice')
+            foreach ($svc in $services) {
+              $service = Get-Service -Name $svc -ErrorAction SilentlyContinue
+              if ($service -and $service.StartType -ne 'Disabled') {
+                Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+                Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+              }
+            }
+      linux:
+        module: command
+        params:
+          command: |
+            for svc in cups avahi-daemon bluetooth ModemManager; do
+              systemctl stop $svc 2>/dev/null || true
+              systemctl disable $svc 2>/dev/null || true
+            done

@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nldevicessetup.local/schemas/profile.schema.json",
+  "title": "Profile",
+  "description": "Device profile template that bundles recipes and variables",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "description": "API version for this profile format",
+      "const": "nldevicessetup/v1"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Resource type",
+      "const": "Profile"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Profile name (used as filename without .yml)",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags for categorization",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["recipes"],
+      "properties": {
+        "inherits": {
+          "type": "string",
+          "description": "Parent profile to inherit from"
+        },
+        "platforms": {
+          "type": "array",
+          "description": "Supported platforms",
+          "items": {
+            "type": "string",
+            "enum": ["windows", "linux", "mikrotik"]
+          }
+        },
+        "recipes": {
+          "type": "array",
+          "description": "Recipes to apply (in order)",
+          "items": { "type": "string" }
+        },
+        "variables": {
+          "type": "object",
+          "description": "Variable overrides for recipes",
+          "additionalProperties": true
+        },
+        "software": {
+          "type": "array",
+          "description": "Additional software to install",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Software name"
+              },
+              "winget": {
+                "type": "string",
+                "description": "Winget package ID (Windows)"
+              },
+              "apt": {
+                "type": "string",
+                "description": "APT package name (Linux)"
+              },
+              "npm": {
+                "type": "string",
+                "description": "NPM package name"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

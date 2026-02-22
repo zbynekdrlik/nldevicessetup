@@ -1,0 +1,64 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: install-reaper
+  description: Install REAPER DAW for audio production
+  tags:
+    - software
+    - audio
+    - daw
+    - reaper
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  requires:
+    - audio-optimize
+
+  actions:
+    - name: Install REAPER
+      description: Install REAPER digital audio workstation
+      windows:
+        module: winget
+        params:
+          package: Cockos.REAPER
+      linux:
+        module: command
+        params:
+          command: |
+            # Download and install REAPER
+            REAPER_VERSION="7.29"
+            REAPER_URL="https://reaper.fm/files/7.x/reaper${REAPER_VERSION//./}_linux_x86_64.tar.xz"
+            TEMP_DIR=$(mktemp -d)
+            cd "$TEMP_DIR"
+            wget -q "$REAPER_URL" -O reaper.tar.xz
+            tar xf reaper.tar.xz
+            cd reaper_linux_x86_64
+            ./install-reaper.sh --install /opt --integrate-desktop --usr-local-bin-symlink
+            cd /
+            rm -rf "$TEMP_DIR"
+      verify:
+        windows: Get-Command reaper -ErrorAction SilentlyContinue
+        linux: which reaper
+
+    - name: Add User to Audio Group (Linux)
+      description: Ensure user is in audio group for realtime scheduling
+      linux:
+        module: command
+        params:
+          command: |
+            # Add current user to audio group
+            if [ -n "$SUDO_USER" ]; then
+              usermod -aG audio "$SUDO_USER"
+            fi
+            # Ensure audio group exists
+            if ! getent group audio &>/dev/null; then
+              groupadd audio
+            fi
+
+  rollback:
+    windows: winget uninstall Cockos.REAPER
+    linux: rm -rf /opt/REAPER && rm -f /usr/local/bin/reaper

@@ -1,0 +1,9 @@
+# This directory contains device inventory and state
+# Each device has its own subdirectory: devices/<hostname>/
+#
+# Structure:
+#   devices/<hostname>/device.yml   - Device registration info
+#   devices/<hostname>/state.yml    - Current installed state
+#   devices/<hostname>/history/     - Execution history logs
+#
+# NOTE: This directory may be gitignored if it contains sensitive IPs

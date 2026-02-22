@@ -1,0 +1,107 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: audio-software
+  description: Install audio production software
+  tags:
+    - software
+    - audio
+    - dante
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  actions:
+    - name: Install Process Lasso
+      description: Install Process Lasso for CPU priority management
+      windows:
+        module: winget
+        params:
+          package: Bitsum.ProcessLasso
+
+    - name: Configure Process Lasso
+      description: Enable Performance Mode and Keep Awake
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKCU:\Software\ProcessLasso
+              name: PerformanceMode
+              value: 1
+              type: DWord
+            - path: HKCU:\Software\ProcessLasso
+              name: PreventSleep
+              value: 1
+              type: DWord
+
+    - name: Install RustDesk
+      description: Install RustDesk for remote access
+      windows:
+        module: winget
+        params:
+          package: RustDesk.RustDesk
+
+    - name: Install Brave Browser
+      description: Install Brave browser
+      windows:
+        module: winget
+        params:
+          package: Brave.Brave
+
+    - name: Install Lightshot
+      description: Install Lightshot screenshot tool
+      windows:
+        module: winget
+        params:
+          package: Skillbrains.Lightshot
+
+    - name: Install DanteTimeSync
+      description: Install DanteTimeSync for PTP clock synchronization
+      windows:
+        module: command
+        params:
+          command: |
+            # Install Visual C++ Runtime (required dependency)
+            winget install Microsoft.VCRedist.2015+.x64 --accept-package-agreements --accept-source-agreements --silent 2>$null
+            # Check if already installed
+            $task = Get-ScheduledTask -TaskName 'DanteTimeSync' -ErrorAction SilentlyContinue
+            if (-not $task) {
+              Invoke-Expression (Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.ps1')
+            }
+      linux:
+        module: command
+        params:
+          command: |
+            if ! command -v dantetimesync &>/dev/null; then
+              curl -sSL https://raw.githubusercontent.com/zbynekdrlik/dantesync/master/install.sh | bash
+            fi
+      verify:
+        windows: Get-ScheduledTask -TaskName 'DanteTimeSync' -ErrorAction SilentlyContinue
+        linux: command -v dantetimesync
+
+    - name: Disable Unnecessary Startup Items
+      description: Disable Edge, Brave, and other startup items
+      windows:
+        module: command
+        params:
+          command: |
+            # Disable Edge startup boost
+            $edgePath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+            if (-not (Test-Path $edgePath)) { New-Item -Path $edgePath -Force | Out-Null }
+            Set-ItemProperty -Path $edgePath -Name 'StartupBoostEnabled' -Value 0 -Type DWord
+            Set-ItemProperty -Path $edgePath -Name 'BackgroundModeEnabled' -Value 0 -Type DWord
+
+            # Remove startup registry entries
+            $runPaths = @(
+              'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+              'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+            )
+            $itemsToRemove = @('Logitech Download Assistant', 'LogiLDA', 'OneDrive', 'Cortana', 'Teams', 'Spotify')
+            foreach ($path in $runPaths) {
+              foreach ($item in $itemsToRemove) {
+                Remove-ItemProperty -Path $path -Name $item -ErrorAction SilentlyContinue
+              }
+            }

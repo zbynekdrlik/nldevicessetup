@@ -1,0 +1,111 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: power-optimize
+  description: Optimize power settings for maximum performance and reliability
+  tags:
+    - power
+    - performance
+    - low-latency
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  variables:
+    power_plan: high_performance
+    disable_sleep: true
+    disable_hibernate: true
+    disable_usb_suspend: true
+
+  actions:
+    - name: Set High Performance Power Plan
+      description: Activate high performance power plan with no sleep/hibernate
+      windows:
+        module: command
+        params:
+          commands:
+            # Activate High Performance plan
+            - powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+            # Disable sleep
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 0
+            # Disable hibernate
+            - powercfg /hibernate off
+            # Disable hard disk turn off
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_DISK DISKIDLE 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_DISK DISKIDLE 0
+            # CPU 100% minimum
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 100
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 100
+            # Disable display turn off
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 0
+            # Disable PCIe ASPM
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0
+            # Apply changes
+            - powercfg /setactive SCHEME_CURRENT
+      linux:
+        module: command
+        params:
+          commands:
+            # Set CPU governor to performance
+            - |
+              for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+                echo "performance" > "$cpu" 2>/dev/null || true
+              done
+            # Disable sleep targets
+            - systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+
+    - name: Configure Power Buttons
+      description: Set power buttons and lid to do nothing
+      windows:
+        module: command
+        params:
+          commands:
+            # Power button do nothing
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS PBUTTONACTION 0
+            # Sleep button do nothing
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS SBUTTONACTION 0
+            # Lid close do nothing
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+            - powercfg /setactive SCHEME_CURRENT
+      linux:
+        module: file
+        params:
+          path: /etc/systemd/logind.conf.d/99-nldevicessetup.conf
+          content: |
+            [Login]
+            HandlePowerKey=ignore
+            HandleSuspendKey=ignore
+            HandleHibernateKey=ignore
+            HandleLidSwitch=ignore
+            HandleLidSwitchExternalPower=ignore
+            HandleLidSwitchDocked=ignore
+            IdleAction=ignore
+          mode: "0644"
+
+    - name: Disable USB Selective Suspend
+      description: Prevent USB devices from being suspended
+      windows:
+        module: command
+        params:
+          commands:
+            - powercfg /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0
+            - powercfg /setactive SCHEME_CURRENT
+      linux:
+        module: file
+        params:
+          path: /etc/udev/rules.d/99-usb-power.rules
+          content: |
+            # Disable USB autosuspend
+            ACTION=="add", SUBSYSTEM=="usb", ATTR{power/autosuspend}="-1"
+            ACTION=="add", SUBSYSTEM=="usb", ATTR{power/control}="on"
+          mode: "0644"

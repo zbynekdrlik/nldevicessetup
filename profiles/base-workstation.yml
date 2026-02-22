@@ -1,0 +1,42 @@
+apiVersion: nldevicessetup/v1
+kind: Profile
+metadata:
+  name: base-workstation
+  description: Base workstation profile with essential optimizations for any production computer
+  tags:
+    - base
+    - production
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  recipes:
+    - ssh-setup
+    - power-optimize
+    - network-optimize
+    - base-software
+
+  variables:
+    ssh_user: newlevel
+    power_plan: high_performance
+    disable_sleep: true
+    disable_hibernate: true
+
+  software:
+    - name: OpenSSH
+      # Installed via recipe (Windows capability, Linux apt)
+    - name: Windows Terminal
+      winget: Microsoft.WindowsTerminal
+    - name: Git
+      winget: Git.Git
+      apt: git
+    - name: GitHub CLI
+      winget: GitHub.cli
+      apt: gh
+    - name: Node.js
+      winget: OpenJS.NodeJS
+      apt: nodejs
+    - name: Claude Code
+      npm: "@anthropic-ai/claude-code"

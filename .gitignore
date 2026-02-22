@@ -1,6 +1,16 @@
 # Credentials - NEVER COMMIT
 TARGETS.md
 
+# Device inventory (contains IP addresses)
+# Uncomment the line below to exclude devices from Git
+# devices/
+
+# Secrets and encrypted files
+*.sops.yaml
+*.enc
+secrets/
+.secrets/
+
 # OS files
 .DS_Store
 Thumbs.db

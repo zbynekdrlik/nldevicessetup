@@ -1,0 +1,137 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: audio-optimize
+  description: Optimize system for low-latency audio (MMCSS, timer resolution, RT limits)
+  tags:
+    - audio
+    - mmcss
+    - low-latency
+    - realtime
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  variables:
+    mmcss_priority: high
+    timer_resolution: 1ms
+    system_responsiveness: 0
+
+  actions:
+    - name: Configure MMCSS Audio Priority
+      description: Set Multimedia Class Scheduler for maximum audio priority
+      windows:
+        module: registry
+        params:
+          values:
+            # System responsiveness - 0 means no CPU reserved for background
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile
+              name: SystemResponsiveness
+              value: 0
+              type: DWord
+            # Audio task priority
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: Affinity
+              value: 0
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: "Background Only"
+              value: "False"
+              type: String
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: "Clock Rate"
+              value: 10000
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: "GPU Priority"
+              value: 8
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: Priority
+              value: 6
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: "Scheduling Category"
+              value: "High"
+              type: String
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio
+              name: "SFIO Priority"
+              value: "High"
+              type: String
+            # Pro Audio task priority
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: Affinity
+              value: 0
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: "Background Only"
+              value: "False"
+              type: String
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: "Clock Rate"
+              value: 10000
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: "GPU Priority"
+              value: 8
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: Priority
+              value: 6
+              type: DWord
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: "Scheduling Category"
+              value: "High"
+              type: String
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio
+              name: "SFIO Priority"
+              value: "High"
+              type: String
+      linux:
+        module: file
+        params:
+          path: /etc/security/limits.d/99-audio.conf
+          content: |
+            # Realtime audio limits
+            @audio   -  rtprio     99
+            @audio   -  memlock    unlimited
+            @audio   -  nice       -20
+            root     -  rtprio     99
+            root     -  memlock    unlimited
+          mode: "0644"
+
+    - name: Optimize Timer Resolution
+      description: Configure 1ms timer resolution
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel
+              name: GlobalTimerResolutionRequests
+              value: 1
+              type: DWord
+      linux:
+        module: sysctl
+        params:
+          values:
+            kernel.sched_autogroup_enabled: 0
+            kernel.timer_migration: 0
+            vm.swappiness: 10
+            vm.dirty_ratio: 10
+            vm.dirty_background_ratio: 5
+
+    - name: Disable Dynamic Tick
+      description: Disable dynamic tick for consistent timer behavior
+      windows:
+        module: command
+        params:
+          command: bcdedit /set disabledynamictick yes
+      linux:
+        # On Linux, this is typically a kernel boot parameter
+        # nohz=off or nohz_full= can be set in GRUB
+        module: command
+        params:
+          command: echo "Consider adding 'nohz=off' to kernel boot parameters for lowest latency"

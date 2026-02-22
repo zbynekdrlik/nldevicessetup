@@ -665,6 +665,15 @@ function Install-DanteTimeSync {
             return $true
         }
         else {
+            # Check if service exists (newer installer uses service instead of task)
+            $svc = Get-Service -Name 'dantesync' -ErrorAction SilentlyContinue
+            if ($svc) {
+                # Set to Manual to prevent startup errors if no Dante hardware
+                Set-Service -Name 'dantesync' -StartupType Manual -ErrorAction SilentlyContinue
+                Write-LogSuccess "DanteTimeSync service installed (set to Manual startup)"
+                $script:Results.Installed += 'DanteTimeSync (Manual)'
+                return $true
+            }
             Write-LogWarn "DanteTimeSync installer ran but scheduled task not found"
             $script:Results.Failed += 'DanteTimeSync (verification failed)'
             return $false
@@ -676,6 +685,16 @@ function Install-DanteTimeSync {
         if ($task) {
             Write-LogSuccess "DanteTimeSync installed successfully (despite errors)"
             $script:Results.Installed += 'DanteTimeSync'
+            return $true
+        }
+
+        # Check if service exists (newer installer uses service instead of task)
+        $svc = Get-Service -Name 'dantesync' -ErrorAction SilentlyContinue
+        if ($svc) {
+            # Set to Manual to prevent startup errors if no Dante hardware
+            Set-Service -Name 'dantesync' -StartupType Manual -ErrorAction SilentlyContinue
+            Write-LogSuccess "DanteTimeSync service installed (set to Manual startup)"
+            $script:Results.Installed += 'DanteTimeSync (Manual)'
             return $true
         }
 
@@ -1634,6 +1653,11 @@ function Main {
 
     # Refresh PATH for Node.js
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+
+    # Set execution policy for npm scripts
+    try {
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction SilentlyContinue
+    } catch {}
 
     # 5. Install npm packages
     $null = Install-NpmPackage -Package '@anthropic-ai/claude-code' -DisplayName 'Claude Code'

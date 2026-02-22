@@ -1,0 +1,112 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: network-optimize
+  description: Optimize network stack for low-latency audio/video
+  tags:
+    - network
+    - low-latency
+    - tcp
+    - performance
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  variables:
+    disable_nagle: true
+    tcp_low_latency: true
+    disable_eee: true
+    disable_flow_control: true
+
+  actions:
+    - name: Optimize TCP Stack
+      description: Configure TCP for low latency (disable Nagle, optimize buffers)
+      windows:
+        module: registry
+        params:
+          values:
+            # Global TCP NoDelay
+            - path: HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters
+              name: TcpAckFrequency
+              value: 1
+              type: DWord
+            - path: HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters
+              name: TCPNoDelay
+              value: 1
+              type: DWord
+            - path: HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters
+              name: TcpDelAckTicks
+              value: 0
+              type: DWord
+            # Disable network throttling
+            - path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile
+              name: NetworkThrottlingIndex
+              value: 0xFFFFFFFF
+              type: DWord
+      linux:
+        module: sysctl
+        params:
+          values:
+            # Network buffer sizes
+            net.core.rmem_max: 26214400
+            net.core.wmem_max: 26214400
+            net.core.rmem_default: 1048576
+            net.core.wmem_default: 1048576
+            net.core.netdev_max_backlog: 65536
+            net.core.somaxconn: 65535
+            # TCP optimization
+            net.ipv4.tcp_rmem: "4096 1048576 26214400"
+            net.ipv4.tcp_wmem: "4096 1048576 26214400"
+            net.ipv4.tcp_slow_start_after_idle: 0
+            net.ipv4.tcp_no_metrics_save: 1
+            net.ipv4.tcp_moderate_rcvbuf: 1
+            net.ipv4.tcp_window_scaling: 1
+            net.ipv4.tcp_timestamps: 1
+            net.ipv4.tcp_sack: 1
+            net.ipv4.tcp_low_latency: 1
+            net.ipv4.tcp_fastopen: 3
+            # UDP optimization
+            net.ipv4.udp_rmem_min: 8192
+            net.ipv4.udp_wmem_min: 8192
+
+    - name: Optimize Network Adapters
+      description: Configure NIC settings for low latency
+      windows:
+        module: command
+        params:
+          command: |
+            # Get all network adapters and configure via registry
+            $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -or $_.Status -eq 'Disconnected' }
+            $regBasePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}"
+            foreach ($adapter in $adapters) {
+              $adapterGuid = $adapter.InterfaceGuid
+              Get-ChildItem $regBasePath -ErrorAction SilentlyContinue | ForEach-Object {
+                $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                if ($props.NetCfgInstanceId -eq $adapterGuid) {
+                  $adapterRegPath = $_.PSPath
+                  # Disable EEE, Flow Control, Power Saving, LSO
+                  Set-ItemProperty -Path $adapterRegPath -Name '*EEE' -Value '0' -ErrorAction SilentlyContinue
+                  Set-ItemProperty -Path $adapterRegPath -Name '*FlowControl' -Value '0' -ErrorAction SilentlyContinue
+                  Set-ItemProperty -Path $adapterRegPath -Name '*InterruptModeration' -Value '1' -ErrorAction SilentlyContinue
+                  Set-ItemProperty -Path $adapterRegPath -Name '*PowerSavingMode' -Value '0' -ErrorAction SilentlyContinue
+                  Set-ItemProperty -Path $adapterRegPath -Name '*LsoV2IPv4' -Value '0' -ErrorAction SilentlyContinue
+                  Set-ItemProperty -Path $adapterRegPath -Name '*LsoV2IPv6' -Value '0' -ErrorAction SilentlyContinue
+                }
+              }
+            }
+      linux:
+        module: command
+        params:
+          command: |
+            if command -v ethtool &>/dev/null; then
+              for iface in $(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$' | grep -v '@'); do
+                ethtool --set-eee "$iface" eee off 2>/dev/null || true
+                ethtool -A "$iface" rx off tx off 2>/dev/null || true
+                ethtool -C "$iface" rx-usecs 0 tx-usecs 0 2>/dev/null || true
+                ethtool -K "$iface" tso off gso off gro off lro off 2>/dev/null || true
+                ip link set "$iface" txqueuelen 10000 2>/dev/null || true
+              done
+            fi

@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nldevicessetup.local/schemas/device.schema.json",
+  "title": "Device",
+  "description": "Device registration and inventory information",
+  "type": "object",
+  "required": ["hostname", "os", "profile", "ssh_user", "registered"],
+  "properties": {
+    "hostname": {
+      "type": "string",
+      "description": "Device hostname (used as directory name)",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.-]*$"
+    },
+    "ip": {
+      "type": "string",
+      "description": "IP address (optional, can be resolved via hostname)",
+      "format": "ipv4"
+    },
+    "os": {
+      "type": "string",
+      "description": "Operating system type",
+      "enum": ["windows", "linux", "mikrotik"]
+    },
+    "os_version": {
+      "type": "string",
+      "description": "Operating system version string",
+      "examples": ["11 Pro 23H2", "Ubuntu 24.04 LTS", "RouterOS 7.14"]
+    },
+    "profile": {
+      "type": "string",
+      "description": "Profile to apply (references profiles/*.yml)",
+      "examples": ["dante-workstation", "video-streaming", "base-workstation"]
+    },
+    "tags": {
+      "type": "array",
+      "description": "Tags for grouping and filtering devices",
+      "items": {
+        "type": "string"
+      },
+      "examples": [
+        ["production", "audio", "dante"],
+        ["staging", "video"]
+      ]
+    },
+    "ssh_user": {
+      "type": "string",
+      "description": "SSH username for remote access",
+      "default": "newlevel"
+    },
+    "ssh_port": {
+      "type": "integer",
+      "description": "SSH port (default 22)",
+      "default": 22,
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "registered": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when device was registered",
+      "format": "date-time"
+    },
+    "last_seen": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when device was last contacted",
+      "format": "date-time"
+    },
+    "hardware": {
+      "type": "object",
+      "description": "Hardware information gathered during registration",
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "description": "CPU model"
+        },
+        "memory_gb": {
+          "type": "number",
+          "description": "Total RAM in GB"
+        },
+        "nics": {
+          "type": "array",
+          "description": "Network interface names",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-form notes about the device"
+    }
+  },
+  "additionalProperties": false
+}

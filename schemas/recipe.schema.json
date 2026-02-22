@@ -1,0 +1,167 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nldevicessetup.local/schemas/recipe.schema.json",
+  "title": "Recipe",
+  "description": "Reusable recipe for device configuration actions",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "description": "API version for this recipe format",
+      "const": "nldevicessetup/v1"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Resource type",
+      "const": "Recipe"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Recipe name (used as filename without .yml)",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this recipe does"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags for categorization",
+          "items": { "type": "string" }
+        },
+        "author": {
+          "type": "string",
+          "description": "Recipe author"
+        },
+        "version": {
+          "type": "string",
+          "description": "Recipe version (semver)",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["actions"],
+      "properties": {
+        "platforms": {
+          "type": "array",
+          "description": "Supported platforms (if empty, all platforms)",
+          "items": {
+            "type": "string",
+            "enum": ["windows", "linux", "mikrotik"]
+          }
+        },
+        "requires": {
+          "type": "array",
+          "description": "Other recipes that must be applied first",
+          "items": { "type": "string" }
+        },
+        "variables": {
+          "type": "object",
+          "description": "Default variable values that can be overridden",
+          "additionalProperties": true
+        },
+        "actions": {
+          "type": "array",
+          "description": "List of actions to perform",
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Action name for logging and history"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this action does"
+        },
+        "when": {
+          "type": "string",
+          "description": "Condition to check before running (shell expression)",
+          "examples": ["os == 'windows'", "version >= '11'"]
+        },
+        "windows": {
+          "$ref": "#/$defs/platformAction",
+          "description": "Windows-specific action"
+        },
+        "linux": {
+          "$ref": "#/$defs/platformAction",
+          "description": "Linux-specific action"
+        },
+        "mikrotik": {
+          "$ref": "#/$defs/platformAction",
+          "description": "Mikrotik RouterOS-specific action"
+        },
+        "verify": {
+          "type": "object",
+          "description": "Verification commands to run after action",
+          "properties": {
+            "windows": { "type": "string" },
+            "linux": { "type": "string" },
+            "mikrotik": { "type": "string" }
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "description": "Commands to undo this action",
+          "properties": {
+            "windows": { "type": "string" },
+            "linux": { "type": "string" },
+            "mikrotik": { "type": "string" }
+          }
+        }
+      }
+    },
+    "platformAction": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Simple command to execute"
+        },
+        {
+          "type": "object",
+          "description": "Complex action with module and parameters",
+          "required": ["module"],
+          "properties": {
+            "module": {
+              "type": "string",
+              "description": "Action module type",
+              "enum": [
+                "command",
+                "script",
+                "registry",
+                "sysctl",
+                "file",
+                "package",
+                "service",
+                "winget",
+                "apt",
+                "npm"
+              ]
+            },
+            "params": {
+              "type": "object",
+              "description": "Module-specific parameters",
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

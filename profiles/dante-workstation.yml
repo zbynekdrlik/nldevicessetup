@@ -1,0 +1,52 @@
+apiVersion: nldevicessetup/v1
+kind: Profile
+metadata:
+  name: dante-workstation
+  description: Low-latency audio workstation optimized for Dante, NDI, and VBAN
+  tags:
+    - audio
+    - dante
+    - production
+    - low-latency
+
+spec:
+  inherits: base-workstation
+
+  platforms:
+    - windows
+    - linux
+
+  recipes:
+    - ssh-setup
+    - power-optimize
+    - network-optimize
+    - audio-optimize
+    - qos-audio
+    - visual-optimize
+    - base-software
+    - audio-software
+
+  variables:
+    ssh_user: newlevel
+    power_plan: high_performance
+    disable_sleep: true
+    disable_hibernate: true
+    mmcss_priority: high
+    timer_resolution: 1ms
+    disable_nagle: true
+    tcp_low_latency: true
+    qos_dante_dscp: 46
+    qos_vban_dscp: 46
+    qos_ptp_dscp: 56
+
+  software:
+    - name: Process Lasso
+      winget: Bitsum.ProcessLasso
+    - name: RustDesk
+      winget: RustDesk.RustDesk
+    - name: Brave Browser
+      winget: Brave.Brave
+    - name: Lightshot
+      winget: Skillbrains.Lightshot
+    - name: DanteTimeSync
+      # Custom installer via recipe

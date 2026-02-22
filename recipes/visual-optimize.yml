@@ -1,0 +1,121 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: visual-optimize
+  description: Optimize visual settings for performance (dark mode, disable effects)
+  tags:
+    - visual
+    - ui
+    - performance
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  variables:
+    enable_dark_mode: true
+    disable_transparency: true
+    disable_animations: true
+    disable_sounds: true
+
+  actions:
+    - name: Enable Dark Mode
+      description: Enable system-wide dark mode
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+              name: AppsUseLightTheme
+              value: 0
+              type: DWord
+            - path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+              name: SystemUsesLightTheme
+              value: 0
+              type: DWord
+      linux:
+        module: command
+        params:
+          command: |
+            if command -v gsettings &>/dev/null; then
+              gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null || true
+            fi
+
+    - name: Disable Transparency
+      description: Disable transparency effects for better performance
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+              name: EnableTransparency
+              value: 0
+              type: DWord
+
+    - name: Optimize Visual Effects
+      description: Set visual effects to best performance
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects
+              name: VisualFXSetting
+              value: 3
+              type: DWord
+            # Disable animations
+            - path: HKCU:\Control Panel\Desktop\WindowMetrics
+              name: MinAnimate
+              value: "0"
+              type: String
+            # Disable Aero Peek
+            - path: HKCU:\Software\Microsoft\Windows\DWM
+              name: EnableAeroPeek
+              value: 0
+              type: DWord
+
+    - name: Set Taskbar Alignment Left
+      description: Set Windows 11 taskbar alignment to left
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+              name: TaskbarAl
+              value: 0
+              type: DWord
+
+    - name: Disable Windows Sounds
+      description: Set sound scheme to No Sounds
+      windows:
+        module: registry
+        params:
+          values:
+            - path: HKCU:\AppEvents\Schemes
+              name: "(Default)"
+              value: ".None"
+              type: String
+            - path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\BootAnimation
+              name: DisableStartupSound
+              value: 1
+              type: DWord
+
+    - name: Disable Screen Timeout
+      description: Prevent screen from turning off
+      windows:
+        module: command
+        params:
+          commands:
+            - powercfg /setacvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 0
+            - powercfg /setdcvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 0
+            - powercfg /setactive SCHEME_CURRENT
+      linux:
+        module: command
+        params:
+          command: |
+            if command -v gsettings &>/dev/null; then
+              gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+              gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+              gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
+            fi

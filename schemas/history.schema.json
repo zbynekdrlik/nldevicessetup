@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nldevicessetup.local/schemas/history.schema.json",
+  "title": "ExecutionHistory",
+  "description": "Execution history record for a recipe run on a device",
+  "type": "object",
+  "required": [
+    "session_id",
+    "executed_by",
+    "recipe",
+    "started",
+    "status",
+    "actions"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Unique session identifier (timestamp-based)",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}-\\d{6}$",
+      "examples": ["2026-02-22-143000"]
+    },
+    "executed_by": {
+      "type": "string",
+      "description": "Who/what executed this recipe",
+      "examples": ["claude-code", "manual", "ci-pipeline"]
+    },
+    "recipe": {
+      "type": "string",
+      "description": "Recipe name that was executed"
+    },
+    "started": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when execution started",
+      "format": "date-time"
+    },
+    "completed": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when execution completed",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "description": "Overall execution status",
+      "enum": ["success", "partial", "failed", "rolled_back"]
+    },
+    "trigger": {
+      "type": "string",
+      "description": "What triggered this execution",
+      "examples": ["user-prompt", "scheduled", "git-hook"]
+    },
+    "commit_before": {
+      "type": "string",
+      "description": "Git commit SHA before execution (plan commit)"
+    },
+    "commit_after": {
+      "type": "string",
+      "description": "Git commit SHA after execution (result commit)"
+    },
+    "actions": {
+      "type": "array",
+      "description": "Individual action results",
+      "items": {
+        "type": "object",
+        "required": ["action", "result"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action name from recipe"
+          },
+          "module": {
+            "type": "string",
+            "description": "Module type used"
+          },
+          "result": {
+            "type": "string",
+            "description": "Action result",
+            "enum": ["success", "skipped", "failed"]
+          },
+          "output": {
+            "type": "string",
+            "description": "Command output or result message"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if failed"
+          },
+          "changes": {
+            "type": "array",
+            "description": "List of changes made by this action",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Type of change",
+                  "enum": [
+                    "registry",
+                    "file",
+                    "sysctl",
+                    "service",
+                    "package",
+                    "command"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Path to changed resource"
+                },
+                "old_value": {
+                  "description": "Previous value (if applicable)"
+                },
+                "new_value": {
+                  "description": "New value (if applicable)"
+                }
+              }
+            }
+          },
+          "duration_ms": {
+            "type": "integer",
+            "description": "Action duration in milliseconds"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Execution summary statistics",
+      "properties": {
+        "total_actions": { "type": "integer" },
+        "succeeded": { "type": "integer" },
+        "failed": { "type": "integer" },
+        "skipped": { "type": "integer" },
+        "duration_ms": { "type": "integer" }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Additional notes about this execution"
+    }
+  },
+  "additionalProperties": false
+}

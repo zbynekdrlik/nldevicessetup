@@ -1,0 +1,19 @@
+session_id: 2026-02-22-214933
+executed_by: claude-code
+recipe: install-reaper
+started: 2026-02-22T20:49:33Z
+completed: 2026-02-22T20:49:33Z
+status: success
+trigger: user-prompt
+actions:
+  - action: Check REAPER installation
+    module: winget
+    result: success
+    output: "REAPER 7.61 already installed"
+    changes: []
+summary:
+  total_actions: 1
+  succeeded: 1
+  failed: 0
+  skipped: 0
+notes: REAPER was already installed via winget, no action needed

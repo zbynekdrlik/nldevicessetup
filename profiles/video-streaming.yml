@@ -1,0 +1,48 @@
+apiVersion: nldevicessetup/v1
+kind: Profile
+metadata:
+  name: video-streaming
+  description: Video streaming workstation optimized for NDI and low-latency video
+  tags:
+    - video
+    - ndi
+    - streaming
+    - production
+
+spec:
+  inherits: dante-workstation
+
+  platforms:
+    - windows
+    - linux
+
+  recipes:
+    - ssh-setup
+    - power-optimize
+    - network-optimize
+    - audio-optimize
+    - qos-audio
+    - visual-optimize
+    - base-software
+    - video-software
+
+  variables:
+    ssh_user: newlevel
+    power_plan: high_performance
+    disable_sleep: true
+    disable_hibernate: true
+    # Higher network buffers for video
+    network_buffer_size: 26214400
+    # NDI uses multicast, ensure IGMP snooping compatible settings
+    enable_igmp: true
+
+  software:
+    - name: OBS Studio
+      winget: OBSProject.OBSStudio
+      apt: obs-studio
+    - name: VLC
+      winget: VideoLAN.VLC
+      apt: vlc
+    - name: FFmpeg
+      winget: Gyan.FFmpeg
+      apt: ffmpeg

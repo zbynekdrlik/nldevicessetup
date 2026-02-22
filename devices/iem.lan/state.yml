@@ -1,0 +1,20 @@
+# Current state for iem.lan
+# Last updated: 2026-02-22T21:49:33Z
+
+last_updated: 2026-02-22T21:49:33Z
+
+software:
+  reaper:
+    version: "7.61"
+    installed: 2026-02-22T21:49:33Z
+    recipe: install-reaper
+
+optimizations:
+  network: {}
+  power: {}
+  audio: {}
+
+applied_recipes:
+  - name: install-reaper
+    applied_at: 2026-02-22T21:49:33Z
+    session_id: 2026-02-22-214933

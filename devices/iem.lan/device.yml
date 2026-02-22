@@ -1,0 +1,20 @@
+# Device registration for iem.lan
+# Generated: 2026-02-22T20:48:38Z
+
+hostname: iem.lan
+ip: 10.77.9.231
+os: windows
+os_version: "Windows 11 IoT Enterprise LTSC Build 26100"
+profile: dante-workstation
+tags:
+  - production
+  - audio
+  - dante
+ssh_user: newlevel
+ssh_port: 22
+registered: 2026-02-22T20:48:38Z
+last_seen: 2026-02-22T20:48:38Z
+
+hardware:
+  cpu: "x64-based PC"
+  memory_gb: 32

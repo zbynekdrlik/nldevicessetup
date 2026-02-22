@@ -1,0 +1,106 @@
+apiVersion: nldevicessetup/v1
+kind: Recipe
+metadata:
+  name: qos-audio
+  description: Configure QoS for Dante and VBAN audio traffic
+  tags:
+    - qos
+    - dante
+    - vban
+    - network
+    - audio
+  version: "1.0.0"
+
+spec:
+  platforms:
+    - windows
+    - linux
+
+  variables:
+    # DSCP values
+    dscp_ptp: 56 # CS7 - highest priority for clock sync
+    dscp_audio: 46 # EF - expedited forwarding for audio
+    dscp_control: 8 # CS1 - low priority for control/discovery
+
+  actions:
+    - name: Configure VBAN QoS Policy
+      description: Mark VBAN traffic (UDP 6980-6989) with DSCP 46
+      windows:
+        module: command
+        params:
+          command: |
+            Remove-NetQosPolicy -Name 'VBAN Audio' -Confirm:$false -ErrorAction SilentlyContinue
+            New-NetQosPolicy -Name 'VBAN Audio' -IPProtocol UDP -IPDstPortStart 6980 -IPDstPortEnd 6989 -DSCPAction 46 -NetworkProfile All -ErrorAction SilentlyContinue
+      linux:
+        module: command
+        params:
+          commands:
+            - iptables -t mangle -D OUTPUT -p udp --dport 6980:6989 -j DSCP --set-dscp 46 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --dport 6980:6989 -j DSCP --set-dscp 46
+            - iptables -t mangle -D OUTPUT -p udp --sport 6980:6989 -j DSCP --set-dscp 46 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --sport 6980:6989 -j DSCP --set-dscp 46
+
+    - name: Configure Dante QoS Policy
+      description: Mark Dante audio traffic (UDP 14336-14600) with DSCP 46
+      windows:
+        module: command
+        params:
+          command: |
+            Remove-NetQosPolicy -Name 'Dante Audio' -Confirm:$false -ErrorAction SilentlyContinue
+            New-NetQosPolicy -Name 'Dante Audio' -IPProtocol UDP -IPDstPortStart 14336 -IPDstPortEnd 14600 -DSCPAction 46 -NetworkProfile All -ErrorAction SilentlyContinue
+      linux:
+        module: command
+        params:
+          commands:
+            - iptables -t mangle -D OUTPUT -p udp --dport 14336:14600 -j DSCP --set-dscp 46 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --dport 14336:14600 -j DSCP --set-dscp 46
+            - iptables -t mangle -D OUTPUT -p udp --sport 14336:14600 -j DSCP --set-dscp 46 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --sport 14336:14600 -j DSCP --set-dscp 46
+
+    - name: Configure PTP QoS Policy
+      description: Mark PTP traffic (UDP 319-320) with DSCP 56 (highest)
+      windows:
+        module: command
+        params:
+          command: |
+            Remove-NetQosPolicy -Name 'PTP Clock' -Confirm:$false -ErrorAction SilentlyContinue
+            New-NetQosPolicy -Name 'PTP Clock' -IPProtocol UDP -IPDstPortStart 319 -IPDstPortEnd 320 -DSCPAction 56 -NetworkProfile All -ErrorAction SilentlyContinue
+      linux:
+        module: command
+        params:
+          commands:
+            - iptables -t mangle -D OUTPUT -p udp --dport 319 -j DSCP --set-dscp 56 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --dport 319 -j DSCP --set-dscp 56
+            - iptables -t mangle -D OUTPUT -p udp --dport 320 -j DSCP --set-dscp 56 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --dport 320 -j DSCP --set-dscp 56
+
+    - name: Configure Dante Control QoS Policy
+      description: Mark Dante control traffic (UDP 8700-8708) with DSCP 8
+      linux:
+        module: command
+        params:
+          commands:
+            - iptables -t mangle -D OUTPUT -p udp --dport 8700:8708 -j DSCP --set-dscp 8 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --dport 8700:8708 -j DSCP --set-dscp 8
+            - iptables -t mangle -D OUTPUT -p udp --dport 4455 -j DSCP --set-dscp 8 2>/dev/null || true
+            - iptables -t mangle -A OUTPUT -p udp --dport 4455 -j DSCP --set-dscp 8
+
+    - name: Persist QoS Rules (Linux)
+      description: Create systemd service to apply QoS rules on boot
+      linux:
+        module: file
+        params:
+          path: /etc/systemd/system/nldevicessetup-qos.service
+          content: |
+            [Unit]
+            Description=NL Devices Setup QoS Rules (Dante/VBAN)
+            After=network.target
+
+            [Service]
+            Type=oneshot
+            ExecStart=/etc/nldevicessetup/qos-rules.sh
+            RemainAfterExit=yes
+
+            [Install]
+            WantedBy=multi-user.target
+          mode: "0644"
